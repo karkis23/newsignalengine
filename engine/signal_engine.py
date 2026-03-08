@@ -63,6 +63,11 @@ class AISignalEngine:
             logger.info("⚠️  joblib/xgboost not available — running in RULES_FALLBACK mode")
             return
 
+        force_rules = os.getenv("FORCE_RULES", "false").lower() == "true"
+        if force_rules:
+            logger.info("⚠️  FORCE_RULES=true detected in environment. Bypassing AI model and explicitly forcing RULES_FALLBACK mode.")
+            return
+
         if not os.path.exists(MODEL_PATH):
             logger.info(f"⚠️  No model found at {MODEL_PATH} — running in RULES_FALLBACK mode")
             logger.info("   Train model first: python scripts/train_model.py")
