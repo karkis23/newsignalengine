@@ -1,0 +1,17 @@
+data/
+*.csv
+*.pkl
+*.bin
+*.json
+models/*.pkl
+models/*.bin
+models/training_report.json
+__pycache__/
+*.py[cod]
+.env
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
