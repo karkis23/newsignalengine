@@ -73,6 +73,8 @@ class SignalResponse(BaseModel):
     putCallPremiumRatio: float = 1.0
     maxCEOIStrike: float = 0.0
     maxPEOIStrike: float = 0.0
+    gammaExposure: Optional[Dict[str, Any]] = None
+    ivSkew: Optional[Dict[str, Any]] = None
 
     # --- ORB (Opening Range Breakout) ---
     orbRange: Optional[Dict[str, float]] = None
@@ -93,8 +95,13 @@ class SignalResponse(BaseModel):
     reason: str = ""
     debugFlags: List[str] = []
     ai_insights: List[str] = []
+    lastSignal: Optional[str] = None
+    lastFireTime: Optional[str] = None
 
     # --- Meta ---
     sessionDate: Optional[str] = None
     processingTimeMs: float = 0.0
     engineVersion: str = "v4.0_AI_Ensemble"
+    candlePatterns: List[str] = []
+    PA_Type: str = "Ranging"
+    MACD_status: str = "Neutral"

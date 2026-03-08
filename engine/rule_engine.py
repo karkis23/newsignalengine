@@ -438,6 +438,7 @@ class RulesEngine:
             else:
                 _MEMORY["firedSignalDirection"] = raw_signal
                 _MEMORY["consecutiveWaits"] = 0
+                _MEMORY["lastFireTime"] = now_ist.isoformat()
 
         if raw_signal == "WAIT":
             _MEMORY["consecutiveWaits"] += 1
@@ -539,15 +540,22 @@ class RulesEngine:
             "putCallPremiumRatio": float(writers_zone.get("putCallPremiumRatio", 1.0)),
             "maxCEOIStrike": float(writers_zone.get("maxCEOIStrike", 0)),
             "maxPEOIStrike": float(writers_zone.get("maxPEOIStrike", 0)),
+            "gammaExposure": writers_zone.get("gammaExposure"),
+            "ivSkew": writers_zone.get("ivSkew"),
             "orbRange": orb_range,
             "Momentum": macd_hist,
             "VolumeRatio": vol_ratio,
             "streakCount": streak_count,
             "streakConfirmed": streak_confirmed,
+            "lastSignal": _MEMORY.get("lastSignal"),
+            "lastFireTime": _MEMORY.get("lastFireTime"),
             "vixMultiplier": vix_multiplier,
             "combinedMultiplier": combined_multiplier,
             "reason": reason,
             "debugFlags": debug_flags,
             "ai_insights": ai_insights or [],
             "sessionDate": session_date,
+            "candlePatterns": indicators.get("CandlePatterns", []),
+            "PA_Type": indicators.get("PriceAction", {}).get("type", "Ranging"),
+            "MACD_status": indicators.get("MACD", {}).get("status", "Neutral")
         }
