@@ -1,0 +1,500 @@
+# N8N COMPLETE SETUP GUIDE - TRADING BOT
+# ========================================
+
+## TABLE OF CONTENTS
+## ================
+1. N8N INSTALLATION OPTIONS
+2. ENVIRONMENT SETUP
+3. WORKFLOW IMPORT PROCESS
+4. NODE CONFIGURATION
+5. CREDENTIAL SETUP
+6. TESTING PROCEDURES
+7. TROUBLESHOOTING
+8. MAINTENANCE
+
+## ================================================================
+## 1. N8N INSTALLATION OPTIONS
+## ================================================================
+
+### OPTION A: LOCAL INSTALLATION (RECOMMENDED FOR BEGINNERS)
+# ============================================================
+
+STEP 1: Install Node.js
+1. Visit https://nodejs.org
+2. Download LTS version (18.x or higher)
+3. Install with default settings
+4. Verify installation:
+   Open terminal/command prompt and run:
+   node --version
+   npm --version
+
+STEP 2: Install n8n
+1. Open terminal/command prompt
+2. Run: npm install n8n -g
+3. Wait for installation to complete
+4. Start n8n: n8n start
+5. Open browser and go to: http://localhost:5678
+
+STEP 3: Initial Setup
+1. Create admin account (first time only)
+2. Set up your workspace
+3. Configure basic settings
+
+### OPTION B: DOCKER INSTALLATION (ADVANCED)
+# ==========================================
+
+STEP 1: Install Docker
+1. Download Docker Desktop from docker.com
+2. Install and start Docker
+
+STEP 2: Run n8n Container
+docker run -it --rm \
+  --name n8n \
+  -p 5678:5678 \
+  -v ~/.n8n:/home/node/.n8n \
+  n8nio/n8n
+
+STEP 3: Access n8n
+Open browser: http://localhost:5678
+
+### OPTION C: CLOUD HOSTING (PRODUCTION)
+# =====================================
+
+OPTION C1: n8n Cloud (Paid Service)
+1. Visit https://n8n.cloud
+2. Sign up for account
+3. Choose plan
+4. Access your instance
+
+OPTION C2: Self-hosted on VPS
+1. Get VPS (DigitalOcean, AWS, etc.)
+2. Install Node.js on server
+3. Install n8n globally
+4. Configure reverse proxy (nginx)
+5. Setup SSL certificate
+6. Configure firewall
+
+## ================================================================
+## 2. ENVIRONMENT SETUP
+## ================================================================
+
+### STEP 1: CREATE ENVIRONMENT FILE
+Create a file named `.env` in your n8n directory:
+
+# Angel One API
+N8N_ANGEL_API_KEY=your_angel_api_key
+N8N_ANGEL_CLIENT_ID=your_client_id
+N8N_ANGEL_PASSWORD=your_password
+N8N_ANGEL_TOTP=123456
+
+# AI Model
+N8N_AI_MODEL_URL=https://your-ai-model.onrender.com
+N8N_AI_API_KEY=your_api_key
+
+# Google Sheets
+N8N_GOOGLE_SHEET_ID=your_sheet_id
+
+# Trading Config
+N8N_PAPER_TRADING_MODE=true
+N8N_LOT_SIZE=25
+N8N_VIX_THRESHOLD=18
+N8N_CONFIDENCE_THRESHOLD=0.75
+
+### STEP 2: SET ENVIRONMENT VARIABLES
+
+FOR WINDOWS:
+1. Open Command Prompt as Administrator
+2. Run these commands:
+setx N8N_ANGEL_API_KEY "your_angel_api_key"
+setx N8N_ANGEL_CLIENT_ID "your_client_id"
+setx N8N_ANGEL_PASSWORD "your_password"
+setx N8N_ANGEL_TOTP "123456"
+setx N8N_AI_MODEL_URL "https://your-ai-model.onrender.com"
+setx N8N_GOOGLE_SHEET_ID "your_sheet_id"
+setx N8N_PAPER_TRADING_MODE "true"
+
+FOR MAC/LINUX:
+1. Open Terminal
+2. Edit ~/.bashrc or ~/.zshrc:
+export N8N_ANGEL_API_KEY="your_angel_api_key"
+export N8N_ANGEL_CLIENT_ID="your_client_id"
+export N8N_ANGEL_PASSWORD="your_password"
+export N8N_ANGEL_TOTP="123456"
+export N8N_AI_MODEL_URL="https://your-ai-model.onrender.com"
+export N8N_GOOGLE_SHEET_ID="your_sheet_id"
+export N8N_PAPER_TRADING_MODE="true"
+
+3. Reload: source ~/.bashrc
+
+### STEP 3: RESTART N8N
+After setting environment variables:
+1. Stop n8n (Ctrl+C)
+2. Start again: n8n start
+3. Verify variables are loaded
+
+## ================================================================
+## 3. WORKFLOW IMPORT PROCESS
+## ================================================================
+
+### STEP 1: DOWNLOAD WORKFLOW FILES
+Ensure you have these files:
+- n8n_workflow_final.json
+- exit_order_monitor.json
+
+### STEP 2: IMPORT MAIN WORKFLOW
+1. Open n8n in browser (http://localhost:5678)
+2. Click "Workflows" in left sidebar
+3. Click "Import from File" button
+4. Select "n8n_workflow_final.json"
+5. Click "Import"
+6. Workflow will appear in your workspace
+
+### STEP 3: IMPORT EXIT MONITOR WORKFLOW
+1. Repeat import process
+2. Select "exit_order_monitor.json"
+3. Click "Import"
+4. Now you have both workflows
+
+### STEP 4: VERIFY IMPORT
+Check that both workflows show:
+- Main Trading Workflow (25+ nodes)
+- Exit Order Monitor (10+ nodes)
+
+## ================================================================
+## 4. NODE CONFIGURATION
+## ================================================================
+
+### STEP 1: CONFIGURE CRON TRIGGER
+1. Open main workflow
+2. Click on "Trading Hours Cron" node
+3. Verify cron expression: */5 9-15 * * 1-5
+4. This runs every 5 minutes, 9 AM to 3 PM, Monday to Friday
+
+### STEP 2: CONFIGURE HTTP REQUEST NODES
+For each HTTP Request node:
+
+ANGEL ONE LOGIN NODE:
+1. Click "Angel One Login" node
+2. Verify URL: https://apiconnect.angelbroking.com/rest/auth/angelbroking/user/v1/loginByPassword
+3. Check headers are correct
+4. Verify body uses environment variables
+
+SPOT PRICE NODE:
+1. Click "Get Spot Price" node
+2. Verify URL and headers
+3. Check authorization uses JWT token from login
+
+AI MODEL NODE:
+1. Click "AI Trade Confirmation" node
+2. Verify URL uses environment variable
+3. Check request body format
+
+### STEP 3: CONFIGURE CODE NODES
+For JavaScript code nodes:
+
+TECHNICAL INDICATORS NODE:
+1. Click "Calculate Technical Indicators"
+2. Review JavaScript code
+3. Ensure all functions are present
+4. Test with sample data
+
+WRITERS ZONE NODE:
+1. Click "Writers Zone Detection"
+2. Verify logic is correct
+3. Test calculations
+
+### STEP 4: CONFIGURE GOOGLE SHEETS NODES
+1. Click any Google Sheets node
+2. Select your Google Sheets credential
+3. Verify sheet ID and sheet names
+4. Test connection
+
+## ================================================================
+## 5. CREDENTIAL SETUP
+## ================================================================
+
+### STEP 1: GOOGLE SHEETS CREDENTIALS
+1. Go to Settings → Credentials
+2. Click "Add Credential"
+3. Choose "Google Sheets API"
+4. Select "Service Account"
+5. Enter service account email
+6. Paste private key (include BEGIN/END lines)
+7. Test connection
+8. Save credential
+
+### STEP 2: HTTP AUTHENTICATION (IF NEEDED)
+For AI model with API key:
+1. Add new credential
+2. Choose "Header Auth"
+3. Name: Authorization
+4. Value: Bearer your_api_key
+
+### STEP 3: VERIFY ALL CREDENTIALS
+Check that all nodes have proper credentials assigned:
+- Google Sheets nodes → Google Sheets credential
+- AI model node → API key credential (if used)
+
+## ================================================================
+## 6. TESTING PROCEDURES
+## ================================================================
+
+### STEP 1: TEST INDIVIDUAL NODES
+Test each node separately:
+
+1. ANGEL ONE LOGIN:
+   - Click "Execute Node"
+   - Should return JWT token
+   - Check for authentication success
+
+2. MARKET DATA NODES:
+   - Test spot price fetch
+   - Test candle data retrieval
+   - Test VIX data fetch
+
+3. TECHNICAL INDICATORS:
+   - Provide sample candle data
+   - Execute node
+   - Verify calculations
+
+4. AI MODEL:
+   - Test with sample data
+   - Check response format
+   - Verify confidence scores
+
+5. GOOGLE SHEETS:
+   - Test data logging
+   - Verify sheet updates
+   - Check formatting
+
+### STEP 2: TEST FULL WORKFLOW
+1. Enable paper trading mode
+2. Set PAPER_TRADING_MODE=true
+3. Execute full workflow
+4. Monitor execution logs
+5. Check Google Sheets for data
+
+### STEP 3: TEST ERROR HANDLING
+Simulate errors:
+- Invalid TOTP code
+- Network timeouts
+- API rate limits
+- Invalid data formats
+
+### STEP 4: TEST SCHEDULING
+1. Activate workflow
+2. Let it run for several cycles
+3. Monitor executions
+4. Check for consistent performance
+
+## ================================================================
+## 7. TROUBLESHOOTING
+## ================================================================
+
+### COMMON ISSUES AND SOLUTIONS:
+
+ISSUE: "Environment variable not found"
+SOLUTION:
+1. Check variable names (case sensitive)
+2. Restart n8n after setting variables
+3. Use Settings → Environment to verify
+
+ISSUE: "Google Sheets authentication failed"
+SOLUTION:
+1. Verify service account email
+2. Check private key format
+3. Ensure sheet is shared with service account
+4. Test credential connection
+
+ISSUE: "Angel One API authentication failed"
+SOLUTION:
+1. Check API key is correct
+2. Verify TOTP code is current
+3. Check client ID and password
+4. Ensure API access is enabled
+
+ISSUE: "AI model not responding"
+SOLUTION:
+1. Check model URL is correct
+2. Verify model is deployed and running
+3. Test with curl command
+4. Check API key if required
+
+ISSUE: "Workflow not triggering"
+SOLUTION:
+1. Check cron expression
+2. Verify workflow is active
+3. Check time zone settings
+4. Look for execution errors
+
+ISSUE: "Orders not placing"
+SOLUTION:
+1. Verify paper trading mode setting
+2. Check Angel One account status
+3. Verify symbol format
+4. Check available margin
+
+### DEBUGGING STEPS:
+1. Check execution logs in n8n
+2. Look for error messages
+3. Test individual nodes
+4. Verify data flow between nodes
+5. Check environment variables
+6. Review API responses
+
+## ================================================================
+## 8. MAINTENANCE
+## ================================================================
+
+### DAILY TASKS:
+□ Check workflow executions
+□ Verify TOTP is current
+□ Monitor error logs
+□ Review trade data in sheets
+□ Check system performance
+
+### WEEKLY TASKS:
+□ Update TOTP secrets
+□ Review workflow performance
+□ Check for n8n updates
+□ Backup workflow configurations
+□ Analyze trading results
+
+### MONTHLY TASKS:
+□ Rotate API credentials
+□ Review and optimize workflows
+□ Update documentation
+□ Performance analysis
+□ Security audit
+
+### BACKUP PROCEDURES:
+1. Export workflows regularly
+2. Backup environment variables
+3. Save credential configurations
+4. Document any customizations
+
+### UPDATE PROCEDURES:
+1. Check for n8n updates
+2. Test updates in development
+3. Backup before updating
+4. Update production carefully
+5. Verify all functions work
+
+### MONITORING SETUP:
+1. Set up execution monitoring
+2. Configure error alerts
+3. Monitor system resources
+4. Track API usage
+5. Performance metrics
+
+## ================================================================
+## ADVANCED CONFIGURATION
+## ================================================================
+
+### CUSTOM ENVIRONMENT VARIABLES:
+Add these for advanced features:
+
+# Risk Management
+N8N_MAX_DAILY_LOSS=5000
+N8N_MAX_POSITIONS=3
+N8N_EMERGENCY_STOP=false
+
+# Performance
+N8N_API_TIMEOUT=30
+N8N_RETRY_COUNT=3
+N8N_RATE_LIMIT_DELAY=1000
+
+# Notifications
+N8N_ENABLE_ALERTS=true
+N8N_ALERT_EMAIL=your@email.com
+
+### WORKFLOW CUSTOMIZATION:
+1. Modify cron schedule if needed
+2. Adjust risk parameters
+3. Customize logging format
+4. Add additional indicators
+5. Implement custom alerts
+
+### SCALING CONSIDERATIONS:
+1. Monitor resource usage
+2. Optimize node performance
+3. Consider workflow splitting
+4. Implement caching where possible
+5. Plan for high availability
+
+## ================================================================
+## SECURITY BEST PRACTICES
+## ================================================================
+
+### CREDENTIAL SECURITY:
+□ Use strong, unique passwords
+□ Enable 2FA where possible
+□ Rotate credentials regularly
+□ Store securely (password manager)
+□ Never share credentials
+
+### NETWORK SECURITY:
+□ Use HTTPS for all connections
+□ Configure firewall properly
+□ Use VPN if accessing remotely
+□ Monitor network traffic
+□ Keep systems updated
+
+### ACCESS CONTROL:
+□ Limit n8n access to authorized users
+□ Use strong admin passwords
+□ Regular security audits
+□ Monitor access logs
+□ Implement IP restrictions if possible
+
+### DATA PROTECTION:
+□ Encrypt sensitive data
+□ Secure backup storage
+□ Regular data cleanup
+□ Monitor data access
+□ Comply with regulations
+
+## ================================================================
+## SUPPORT AND RESOURCES
+## ================================================================
+
+### OFFICIAL DOCUMENTATION:
+- n8n Documentation: https://docs.n8n.io
+- n8n Community: https://community.n8n.io
+- GitHub Repository: https://github.com/n8n-io/n8n
+
+### TROUBLESHOOTING RESOURCES:
+- Community Forum: https://community.n8n.io
+- GitHub Issues: https://github.com/n8n-io/n8n/issues
+- Discord Server: n8n Community Discord
+
+### LEARNING RESOURCES:
+- n8n Academy: https://n8n.io/academy
+- YouTube Tutorials: n8n official channel
+- Blog Posts: https://n8n.io/blog
+
+### GETTING HELP:
+1. Check documentation first
+2. Search community forum
+3. Create detailed issue reports
+4. Provide workflow examples
+5. Include error messages
+
+## ================================================================
+## CONCLUSION
+## ================================================================
+
+This guide provides comprehensive instructions for setting up and configuring your n8n trading bot system. Follow each step carefully, test thoroughly, and always start with paper trading.
+
+Remember:
+- Security is paramount
+- Test everything before going live
+- Monitor continuously
+- Keep backups current
+- Stay updated with n8n releases
+
+Your automated trading system is now ready for deployment!
+
+## ================================================================
+## END OF N8N SETUP GUIDE
+## ================================================================

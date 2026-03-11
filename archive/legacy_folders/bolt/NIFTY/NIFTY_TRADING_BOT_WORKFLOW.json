@@ -1,0 +1,881 @@
+{
+  "name": "Complete Intraday Options Trading Bot - NIFTY Only (Dhan API)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/5 9-15 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Trading Hours Cron",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [180, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "dateTime": [
+            {
+              "value1": "{{new Date().getHours()}}",
+              "operation": "between",
+              "value2": 9,
+              "value3": 15
+            }
+          ]
+        }
+      },
+      "id": "time-filter",
+      "name": "Trading Hours Filter",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.dhan.co/login",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        "body": {
+          "userId": "{{$env.DHAN_CLIENT_ID}}",
+          "password": "{{$env.DHAN_PASSWORD}}",
+          "twoFA": "{{$env.DHAN_2FA}}",
+          "appName": "WEB"
+        }
+      },
+      "id": "dhan-login",
+      "name": "Dhan Authentication",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [620, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.dhan.co/v2/charts/intraday",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "access-token": "{{$node['Dhan Authentication'].json.data.access_token}}"
+        },
+        "qs": {
+          "securityId": "25",
+          "exchangeSegment": "NSE_EQ",
+          "instrument": "INDEX",
+          "interval": "5"
+        }
+      },
+      "id": "get-nifty-data",
+      "name": "Get NIFTY OHLC Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [840, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.dhan.co/v2/marketfeed/ltp",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "access-token": "{{$node['Dhan Authentication'].json.data.access_token}}"
+        },
+        "qs": {
+          "securityId": "25",
+          "exchangeSegment": "NSE_EQ",
+          "instrument": "INDEX"
+        }
+      },
+      "id": "get-spot-price",
+      "name": "Get NIFTY LTP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1060, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.dhan.co/v2/marketfeed/ltp",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "access-token": "{{$node['Dhan Authentication'].json.data.access_token}}"
+        },
+        "qs": {
+          "securityId": "27",
+          "exchangeSegment": "NSE_EQ",
+          "instrument": "INDEX"
+        }
+      },
+      "id": "get-vix-data",
+      "name": "Get India VIX Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1280, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "{{$node['Get India VIX Data'].json.data.LTP}}",
+              "operation": "smaller",
+              "value2": 18
+            }
+          ]
+        }
+      },
+      "id": "vix-filter",
+      "name": "VIX Filter (< 18)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "{{$env.SENTIMENT_API_URL}}/market-sentiment",
+        "headers": {
+          "Authorization": "Bearer {{$env.SENTIMENT_API_KEY}}"
+        }
+      },
+      "id": "market-sentiment",
+      "name": "Market Sentiment API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1720, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://images.dhan.co/api-data/api-scrip-master.csv",
+        "headers": {
+          "Accept": "text/csv"
+        }
+      },
+      "id": "get-instrument-master",
+      "name": "Get Dhan Instrument Master",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1940, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enhanced NIFTY Option Chain Builder using Dhan Instrument Master\nconst csvData = $node['Get Dhan Instrument Master'].json;\nconst spotPrice = parseFloat($node['Get NIFTY LTP'].json.data.LTP);\nconst accessToken = $node['Dhan Authentication'].json.data.access_token;\n\n// Parse CSV data to extract NIFTY options\nconst lines = csvData.split('\\n');\nconst headers = lines[0].split(',');\n\n// Find relevant column indices\nconst securityIdIndex = headers.indexOf('SEM_SECURITY_ID');\nconst tradingSymbolIndex = headers.indexOf('SEM_TRADING_SYMBOL');\nconst instrumentIndex = headers.indexOf('SEM_INSTRUMENT_NAME');\nconst strikeIndex = headers.indexOf('SEM_STRIKE_PRICE');\nconst expiryIndex = headers.indexOf('SEM_EXPIRY_DATE');\nconst lotSizeIndex = headers.indexOf('SEM_LOT_SIZE');\n\n// Get current Thursday expiry for NIFTY (weekly expiry)\nconst today = new Date();\nconst nextThursday = new Date(today);\nconst daysUntilThursday = (4 - today.getDay() + 7) % 7;\n\nif (daysUntilThursday === 0 && today.getHours() >= 15) {\n  nextThursday.setDate(today.getDate() + 7);\n} else {\n  nextThursday.setDate(today.getDate() + daysUntilThursday);\n}\n\nconst expiryDateStr = nextThursday.toISOString().split('T')[0];\n\n// Filter NIFTY options for current expiry\nconst niftyOptions = [];\nconst atmStrike = Math.round(spotPrice / 50) * 50; // NIFTY strikes are in multiples of 50\n\nfor (let i = 1; i < lines.length; i++) {\n  const row = lines[i].split(',');\n  \n  if (row.length < headers.length) continue;\n  \n  const instrument = row[instrumentIndex];\n  const tradingSymbol = row[tradingSymbolIndex];\n  const strike = parseFloat(row[strikeIndex]);\n  const expiry = row[expiryIndex];\n  const securityId = row[securityIdIndex];\n  const lotSize = parseInt(row[lotSizeIndex]);\n  \n  // Filter for NIFTY options with current expiry\n  if (instrument === 'OPTIDX' && \n      tradingSymbol.startsWith('NIFTY') && \n      !tradingSymbol.startsWith('NIFTYBANK') && // Exclude Bank Nifty\n      expiry === expiryDateStr &&\n      strike >= atmStrike - 300 && \n      strike <= atmStrike + 300) {\n    \n    const optionType = tradingSymbol.includes('CE') ? 'CE' : 'PE';\n    \n    niftyOptions.push({\n      securityId: securityId,\n      tradingSymbol: tradingSymbol,\n      strike: strike,\n      optionType: optionType,\n      expiry: expiry,\n      lotSize: lotSize,\n      distanceFromATM: Math.abs(strike - atmStrike)\n    });\n  }\n}\n\n// Sort by distance from ATM\nniftyOptions.sort((a, b) => a.distanceFromATM - b.distanceFromATM);\n\n// Separate CE and PE options\nconst ceOptions = niftyOptions.filter(opt => opt.optionType === 'CE').slice(0, 10);\nconst peOptions = niftyOptions.filter(opt => opt.optionType === 'PE').slice(0, 10);\n\n// Get LTP for top options\nasync function getOptionLTP(securityId) {\n  try {\n    const response = await fetch(`https://api.dhan.co/v2/marketfeed/ltp?securityId=${securityId}&exchangeSegment=NSE_FNO&instrument=OPTIDX`, {\n      headers: {\n        'access-token': accessToken,\n        'Content-Type': 'application/json'\n      }\n    });\n    \n    if (response.ok) {\n      const data = await response.json();\n      return data.data.LTP || 0;\n    }\n  } catch (error) {\n    console.error(`Error fetching LTP for ${securityId}:`, error);\n  }\n  return 0;\n}\n\n// Fetch LTP for CE options\nconst ceOptionsWithLTP = [];\nfor (const option of ceOptions) {\n  const ltp = await getOptionLTP(option.securityId);\n  ceOptionsWithLTP.push({\n    ...option,\n    ltp: ltp,\n    volume: 0,\n    openInterest: 0\n  });\n}\n\n// Fetch LTP for PE options\nconst peOptionsWithLTP = [];\nfor (const option of peOptions) {\n  const ltp = await getOptionLTP(option.securityId);\n  peOptionsWithLTP.push({\n    ...option,\n    ltp: ltp,\n    volume: 0,\n    openInterest: 0\n  });\n}\n\nreturn {\n  spotPrice: spotPrice,\n  atmStrike: atmStrike,\n  expiry: expiryDateStr,\n  ceOptions: ceOptionsWithLTP,\n  peOptions: peOptionsWithLTP,\n  totalOptionsFound: niftyOptions.length,\n  underlying: 'NIFTY',\n  lotSize: 50, // NIFTY lot size\n  timestamp: new Date().toISOString()\n};"
+      },
+      "id": "build-option-chain",
+      "name": "Build NIFTY Option Chain",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2160, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enhanced Technical Indicators for NIFTY Trading\nconst ohlcData = $node['Get NIFTY OHLC Data'].json.data || [];\nconst currentPrice = parseFloat($node['Get NIFTY LTP'].json.data.LTP);\nconst vix = parseFloat($node['Get India VIX Data'].json.data.LTP);\n\n// RSI Calculation (14 period)\nfunction calculateRSI(prices, period = 14) {\n  if (prices.length < period + 1) return 50;\n  \n  const gains = [];\n  const losses = [];\n  \n  for (let i = 1; i < prices.length; i++) {\n    const change = prices[i] - prices[i-1];\n    gains.push(change > 0 ? change : 0);\n    losses.push(change < 0 ? Math.abs(change) : 0);\n  }\n  \n  const avgGain = gains.slice(-period).reduce((a, b) => a + b, 0) / period;\n  const avgLoss = losses.slice(-period).reduce((a, b) => a + b, 0) / period;\n  \n  if (avgLoss === 0) return 100;\n  const rs = avgGain / avgLoss;\n  return 100 - (100 / (1 + rs));\n}\n\n// MACD Calculation\nfunction calculateEMA(prices, period) {\n  if (prices.length === 0) return 0;\n  const k = 2 / (period + 1);\n  let ema = prices[0];\n  for (let i = 1; i < prices.length; i++) {\n    ema = prices[i] * k + ema * (1 - k);\n  }\n  return ema;\n}\n\nfunction calculateMACD(prices) {\n  if (prices.length < 26) return { macd: 0, signal: 0, histogram: 0 };\n  \n  const ema12 = calculateEMA(prices, 12);\n  const ema26 = calculateEMA(prices, 26);\n  const macd = ema12 - ema26;\n  \n  const macdLine = [macd];\n  const signal = calculateEMA(macdLine, 9);\n  \n  return {\n    macd: macd,\n    signal: signal,\n    histogram: macd - signal\n  };\n}\n\n// Volume Analysis for NIFTY\nfunction calculateVolumeRatio(ohlcData) {\n  if (ohlcData.length < 20) return 1.0;\n  \n  const currentVolume = parseFloat(ohlcData[ohlcData.length - 1].volume || 0);\n  const avgVolume = ohlcData.slice(-20).reduce((sum, candle) => \n    sum + parseFloat(candle.volume || 0), 0) / 20;\n  \n  return avgVolume > 0 ? currentVolume / avgVolume : 1.0;\n}\n\n// Momentum Calculation\nfunction calculateMomentum(prices, period = 10) {\n  if (prices.length < period) return 0;\n  const current = prices[prices.length - 1];\n  const previous = prices[prices.length - period];\n  return previous > 0 ? ((current - previous) / previous) * 100 : 0;\n}\n\n// NIFTY-specific Candle Pattern Detection\nfunction detectCandlePattern(candle) {\n  if (!candle) return \"NORMAL\";\n  \n  const open = parseFloat(candle.open || 0);\n  const high = parseFloat(candle.high || 0);\n  const low = parseFloat(candle.low || 0);\n  const close = parseFloat(candle.close || 0);\n  \n  const body = Math.abs(close - open);\n  const upperShadow = high - Math.max(open, close);\n  const lowerShadow = Math.min(open, close) - low;\n  const totalRange = high - low;\n  \n  if (totalRange === 0) return \"NORMAL\";\n  \n  // NIFTY-specific pattern thresholds\n  const bodyRatio = body / totalRange;\n  const upperShadowRatio = upperShadow / body;\n  const lowerShadowRatio = lowerShadow / body;\n  \n  if (bodyRatio < 0.1) return \"DOJI\";\n  if (lowerShadowRatio > 2 && upperShadowRatio < 0.5) return \"HAMMER\";\n  if (upperShadowRatio > 2 && lowerShadowRatio < 0.5) return \"SHOOTING_STAR\";\n  if (upperShadow < totalRange * 0.05 && lowerShadow < totalRange * 0.05) return \"MARUBOZU\";\n  \n  return \"NORMAL\";\n}\n\n// NIFTY Market Strength Analysis\nfunction analyzeNiftyMarketStrength(rsi, macd, momentum, volumeRatio, vix) {\n  let strength = 0;\n  let signals = [];\n  \n  // RSI Analysis for NIFTY\n  if (rsi < 35) {\n    strength += 2;\n    signals.push(\"NIFTY_RSI_OVERSOLD\");\n  } else if (rsi > 65) {\n    strength -= 2;\n    signals.push(\"NIFTY_RSI_OVERBOUGHT\");\n  }\n  \n  // MACD Analysis\n  if (macd.macd > 0 && macd.histogram > 0) {\n    strength += 1.5;\n    signals.push(\"NIFTY_MACD_BULLISH\");\n  } else if (macd.macd < 0 && macd.histogram < 0) {\n    strength -= 1.5;\n    signals.push(\"NIFTY_MACD_BEARISH\");\n  }\n  \n  // NIFTY Momentum Analysis\n  if (momentum > 1.5) {\n    strength += 1;\n    signals.push(\"NIFTY_MOMENTUM_BULLISH\");\n  } else if (momentum < -1.5) {\n    strength -= 1;\n    signals.push(\"NIFTY_MOMENTUM_BEARISH\");\n  }\n  \n  // Volume Analysis\n  if (volumeRatio > 1.3) {\n    strength += 0.5;\n    signals.push(\"NIFTY_VOLUME_SURGE\");\n  }\n  \n  // VIX Impact on NIFTY\n  if (vix > 20) {\n    strength *= 0.8; // Reduce strength in high volatility\n    signals.push(\"HIGH_VIX_CAUTION\");\n  }\n  \n  return { strength, signals };\n}\n\n// Extract and calculate indicators\nconst closePrices = ohlcData.map(d => parseFloat(d.close || 0)).filter(p => p > 0);\nconst lastCandle = ohlcData[ohlcData.length - 1];\n\nconst rsi = calculateRSI(closePrices);\nconst macd = calculateMACD(closePrices);\nconst momentum = calculateMomentum(closePrices);\nconst volumeRatio = calculateVolumeRatio(ohlcData);\nconst candlePattern = detectCandlePattern(lastCandle);\nconst marketAnalysis = analyzeNiftyMarketStrength(rsi, macd, momentum, volumeRatio, vix);\n\n// Get sentiment from previous node\nconst sentiment = $node['Market Sentiment API'].json.sentiment || 'NEUTRAL';\n\n// Compile NIFTY-specific indicators\nconst indicators = {\n  // Basic Indicators\n  rsi: Math.round(rsi * 100) / 100,\n  macd: {\n    macd: Math.round(macd.macd * 100) / 100,\n    signal: Math.round(macd.signal * 100) / 100,\n    histogram: Math.round(macd.histogram * 100) / 100\n  },\n  momentum: Math.round(momentum * 100) / 100,\n  volumeRatio: Math.round(volumeRatio * 100) / 100,\n  \n  // Market Data\n  spotPrice: currentPrice,\n  vix: vix,\n  sentiment: sentiment,\n  candlePattern: candlePattern,\n  underlying: 'NIFTY',\n  \n  // Analysis Results\n  marketStrength: Math.round(marketAnalysis.strength * 100) / 100,\n  detectedSignals: marketAnalysis.signals,\n  signalCount: marketAnalysis.signals.length,\n  \n  // NIFTY Market Conditions\n  volatilityRegime: vix > 20 ? \"HIGH\" : vix > 15 ? \"MEDIUM\" : \"LOW\",\n  trendDirection: marketAnalysis.strength > 1 ? \"BULLISH\" : \n                  marketAnalysis.strength < -1 ? \"BEARISH\" : \"SIDEWAYS\",\n  \n  // Additional Context\n  timestamp: new Date().toISOString(),\n  dataPoints: closePrices.length,\n  priceChange: closePrices.length > 1 ? \n    Math.round(((closePrices[closePrices.length - 1] - closePrices[closePrices.length - 2]) / \n    closePrices[closePrices.length - 2]) * 10000) / 100 : 0\n};\n\nreturn { indicators };"
+      },
+      "id": "technical-indicators",
+      "name": "Calculate NIFTY Technical Indicators",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2380, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enhanced NIFTY Writers Zone Detection with Premium Analysis\nconst optionChainData = $node['Build NIFTY Option Chain'].json;\nconst ceOptions = optionChainData.ceOptions || [];\nconst peOptions = optionChainData.peOptions || [];\nconst spotPrice = optionChainData.spotPrice;\nconst atmStrike = optionChainData.atmStrike;\n\n// Initialize analysis variables\nlet maxCELTP = 0;\nlet maxPELTP = 0;\nlet maxCEStrike = 0;\nlet maxPEStrike = 0;\nlet totalCEValue = 0;\nlet totalPEValue = 0;\n\n// Arrays to store option data for analysis\nconst ceAnalysis = [];\nconst peAnalysis = [];\n\n// Process CE Options\nceOptions.forEach(option => {\n  const strike = option.strike;\n  const ltp = option.ltp;\n  \n  if (strike > 0 && ltp > 0) {\n    ceAnalysis.push({ strike, ltp, type: 'CE', distanceFromATM: option.distanceFromATM });\n    totalCEValue += ltp;\n    \n    if (ltp > maxCELTP) {\n      maxCELTP = ltp;\n      maxCEStrike = strike;\n    }\n  }\n});\n\n// Process PE Options\npeOptions.forEach(option => {\n  const strike = option.strike;\n  const ltp = option.ltp;\n  \n  if (strike > 0 && ltp > 0) {\n    peAnalysis.push({ strike, ltp, type: 'PE', distanceFromATM: option.distanceFromATM });\n    totalPEValue += ltp;\n    \n    if (ltp > maxPELTP) {\n      maxPELTP = ltp;\n      maxPEStrike = strike;\n    }\n  }\n});\n\n// Calculate Put-Call Premium Ratio for NIFTY\nconst putCallPremiumRatio = totalCEValue > 0 ? totalPEValue / totalCEValue : 1.0;\n\n// NIFTY-specific Writers Zone Analysis\nfunction analyzeNiftyWritersZone() {\n  let analysis = {\n    zone: 'NEUTRAL',\n    confidence: 0,\n    reasoning: [],\n    supportLevels: [],\n    resistanceLevels: [],\n    marketStructure: 'BALANCED'\n  };\n  \n  // NIFTY-specific analysis thresholds\n  const niftyVolatilityFactor = spotPrice > 20000 ? 100 : 50;\n  \n  // Price position analysis for NIFTY\n  if (spotPrice > atmStrike + niftyVolatilityFactor) {\n    analysis.zone = 'BULLISH';\n    analysis.confidence += 0.3;\n    analysis.reasoning.push('NIFTY trading significantly above ATM');\n  } else if (spotPrice < atmStrike - niftyVolatilityFactor) {\n    analysis.zone = 'BEARISH';\n    analysis.confidence += 0.3;\n    analysis.reasoning.push('NIFTY trading significantly below ATM');\n  }\n  \n  // NIFTY Premium Ratio Analysis\n  if (putCallPremiumRatio > 1.15) {\n    analysis.marketStructure = 'PUT_PREMIUM_HIGH';\n    if (analysis.zone === 'BEARISH') {\n      analysis.confidence += 0.3;\n      analysis.reasoning.push('High Put premium confirms NIFTY bearish sentiment');\n    } else if (analysis.zone === 'NEUTRAL') {\n      analysis.zone = 'BEARISH';\n      analysis.confidence += 0.2;\n      analysis.reasoning.push('High Put premium suggests NIFTY bearish bias');\n    }\n  } else if (putCallPremiumRatio < 0.85) {\n    analysis.marketStructure = 'CALL_PREMIUM_HIGH';\n    if (analysis.zone === 'BULLISH') {\n      analysis.confidence += 0.3;\n      analysis.reasoning.push('High Call premium confirms NIFTY bullish sentiment');\n    } else if (analysis.zone === 'NEUTRAL') {\n      analysis.zone = 'BULLISH';\n      analysis.confidence += 0.2;\n      analysis.reasoning.push('High Call premium suggests NIFTY bullish bias');\n    }\n  } else {\n    analysis.marketStructure = 'BALANCED';\n    analysis.reasoning.push('Balanced NIFTY premium distribution');\n  }\n  \n  // ATM Analysis for NIFTY\n  const atmCE = ceOptions.find(opt => opt.strike === atmStrike);\n  const atmPE = peOptions.find(opt => opt.strike === atmStrike);\n  \n  if (atmCE && atmPE) {\n    const atmSkew = atmCE.ltp / atmPE.ltp;\n    if (atmSkew > 1.15) {\n      analysis.confidence += 0.1;\n      analysis.reasoning.push('NIFTY ATM Call premium higher (bullish skew)');\n    } else if (atmSkew < 0.85) {\n      analysis.confidence += 0.1;\n      analysis.reasoning.push('NIFTY ATM Put premium higher (bearish skew)');\n    }\n  }\n  \n  // NIFTY Support and Resistance Levels\n  const sortedPEStrikes = peOptions\n    .filter(opt => opt.strike <= spotPrice && opt.ltp > 3)\n    .sort((a, b) => b.ltp - a.ltp)\n    .slice(0, 3)\n    .map(opt => opt.strike);\n  \n  const sortedCEStrikes = ceOptions\n    .filter(opt => opt.strike >= spotPrice && opt.ltp > 3)\n    .sort((a, b) => b.ltp - a.ltp)\n    .slice(0, 3)\n    .map(opt => opt.strike);\n  \n  analysis.supportLevels = sortedPEStrikes;\n  analysis.resistanceLevels = sortedCEStrikes;\n  \n  // Final confidence adjustment\n  analysis.confidence = Math.min(analysis.confidence, 1.0);\n  \n  if (analysis.confidence < 0.3) {\n    analysis.zone = 'NEUTRAL';\n    analysis.reasoning.push('Insufficient conviction for NIFTY directional bias');\n  }\n  \n  return analysis;\n}\n\n// Perform the analysis\nconst writersAnalysis = analyzeNiftyWritersZone();\n\n// Compile comprehensive results\nconst result = {\n  // Primary Results\n  writersZone: writersAnalysis.zone,\n  confidence: Math.round(writersAnalysis.confidence * 100) / 100,\n  \n  // Premium Data\n  maxCELTP: maxCELTP,\n  maxPELTP: maxPELTP,\n  maxCEStrike: maxCEStrike,\n  maxPEStrike: maxPEStrike,\n  totalCEValue: Math.round(totalCEValue * 100) / 100,\n  totalPEValue: Math.round(totalPEValue * 100) / 100,\n  putCallPremiumRatio: Math.round(putCallPremiumRatio * 100) / 100,\n  \n  // Significant Levels\n  supportLevels: writersAnalysis.supportLevels,\n  resistanceLevels: writersAnalysis.resistanceLevels,\n  \n  // Analysis Details\n  reasoning: writersAnalysis.reasoning,\n  marketStructure: writersAnalysis.marketStructure,\n  \n  // Market Context\n  currentPrice: spotPrice,\n  atmStrike: atmStrike,\n  distanceFromATM: Math.abs(spotPrice - atmStrike),\n  underlying: 'NIFTY',\n  \n  // Statistics\n  ceOptionsAnalyzed: ceAnalysis.length,\n  peOptionsAnalyzed: peAnalysis.length,\n  \n  // Timestamp\n  timestamp: new Date().toISOString()\n};\n\nreturn result;"
+      },
+      "id": "writers-zone-analysis",
+      "name": "NIFTY Writers Zone Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2600, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "{{$env.AI_MODEL_URL}}/predict",
+        "headers": {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer {{$env.AI_API_KEY}}"
+        },
+        "body": {
+          "underlying": "NIFTY",
+          "spotPrice": "{{$node['Calculate NIFTY Technical Indicators'].json.indicators.spotPrice}}",
+          "rsi": "{{$node['Calculate NIFTY Technical Indicators'].json.indicators.rsi}}",
+          "macd": "{{$node['Calculate NIFTY Technical Indicators'].json.indicators.macd.macd}}",
+          "momentum": "{{$node['Calculate NIFTY Technical Indicators'].json.indicators.momentum}}",
+          "volumeRatio": "{{$node['Calculate NIFTY Technical Indicators'].json.indicators.volumeRatio}}",
+          "candlePattern": "{{$node['Calculate NIFTY Technical Indicators'].json.indicators.candlePattern}}",
+          "vix": "{{$node['Calculate NIFTY Technical Indicators'].json.indicators.vix}}",
+          "sentiment": "{{$node['Calculate NIFTY Technical Indicators'].json.indicators.sentiment}}",
+          "writersZone": "{{$node['NIFTY Writers Zone Analysis'].json.writersZone}}",
+          "marketStrength": "{{$node['Calculate NIFTY Technical Indicators'].json.indicators.marketStrength}}",
+          "detectedSignals": "{{$node['Calculate NIFTY Technical Indicators'].json.indicators.detectedSignals}}",
+          "writersConfidence": "{{$node['NIFTY Writers Zone Analysis'].json.confidence}}",
+          "putCallPremiumRatio": "{{$node['NIFTY Writers Zone Analysis'].json.putCallPremiumRatio}}",
+          "supportLevels": "{{$node['NIFTY Writers Zone Analysis'].json.supportLevels}}",
+          "resistanceLevels": "{{$node['NIFTY Writers Zone Analysis'].json.resistanceLevels}}"
+        }
+      },
+      "id": "ai-trade-confirmation",
+      "name": "AI NIFTY Trade Confirmation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2820, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "{{$node['AI NIFTY Trade Confirmation'].json.signal}}",
+              "operation": "notEqual",
+              "value2": "HOLD"
+            }
+          ],
+          "number": [
+            {
+              "value1": "{{$node['AI NIFTY Trade Confirmation'].json.confidence}}",
+              "operation": "largerEqual",
+              "value2": 0.75
+            }
+          ]
+        }
+      },
+      "id": "signal-confidence-filter",
+      "name": "Signal & Confidence Filter",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [3040, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "spreadsheet",
+        "operation": "appendOrUpdate",
+        "documentId": "{{$env.GOOGLE_SHEET_ID}}",
+        "sheetName": "NIFTY_Signals",
+        "dataMode": "defineBelow",
+        "valueInputMode": "raw",
+        "columnToMatchOn": "A",
+        "valueToMatchOn": "={{new Date().toISOString()}}",
+        "fieldsUi": {
+          "values": [
+            {
+              "fieldId": "Timestamp",
+              "fieldValue": "={{new Date().toISOString()}}"
+            },
+            {
+              "fieldId": "Signal",
+              "fieldValue": "={{$node['AI NIFTY Trade Confirmation'].json.signal}}"
+            },
+            {
+              "fieldId": "Confidence",
+              "fieldValue": "={{$node['AI NIFTY Trade Confirmation'].json.confidence}}"
+            },
+            {
+              "fieldId": "RSI",
+              "fieldValue": "={{$node['Calculate NIFTY Technical Indicators'].json.indicators.rsi}}"
+            },
+            {
+              "fieldId": "MACD",
+              "fieldValue": "={{$node['Calculate NIFTY Technical Indicators'].json.indicators.macd.macd}}"
+            },
+            {
+              "fieldId": "Momentum",
+              "fieldValue": "={{$node['Calculate NIFTY Technical Indicators'].json.indicators.momentum}}"
+            },
+            {
+              "fieldId": "Volume Ratio",
+              "fieldValue": "={{$node['Calculate NIFTY Technical Indicators'].json.indicators.volumeRatio}}"
+            },
+            {
+              "fieldId": "VIX",
+              "fieldValue": "={{$node['Calculate NIFTY Technical Indicators'].json.indicators.vix}}"
+            },
+            {
+              "fieldId": "Sentiment",
+              "fieldValue": "={{$node['Calculate NIFTY Technical Indicators'].json.indicators.sentiment}}"
+            },
+            {
+              "fieldId": "Writers Zone",
+              "fieldValue": "={{$node['NIFTY Writers Zone Analysis'].json.writersZone}}"
+            },
+            {
+              "fieldId": "Candle Pattern",
+              "fieldValue": "={{$node['Calculate NIFTY Technical Indicators'].json.indicators.candlePattern}}"
+            },
+            {
+              "fieldId": "Spot Price",
+              "fieldValue": "={{$node['Calculate NIFTY Technical Indicators'].json.indicators.spotPrice}}"
+            },
+            {
+              "fieldId": "Market Strength",
+              "fieldValue": "={{$node['Calculate NIFTY Technical Indicators'].json.indicators.marketStrength}}"
+            },
+            {
+              "fieldId": "Put Call Premium Ratio",
+              "fieldValue": "={{$node['NIFTY Writers Zone Analysis'].json.putCallPremiumRatio}}"
+            },
+            {
+              "fieldId": "Writers Confidence",
+              "fieldValue": "={{$node['NIFTY Writers Zone Analysis'].json.confidence}}"
+            },
+            {
+              "fieldId": "ATM Strike",
+              "fieldValue": "={{$node['NIFTY Writers Zone Analysis'].json.atmStrike}}"
+            }
+          ]
+        }
+      },
+      "id": "log-signal-sheets",
+      "name": "Log NIFTY Signal to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [3260, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enhanced NIFTY Strike Selection and Order Preparation for Dhan\nconst signal = $node['AI NIFTY Trade Confirmation'].json.signal;\nconst optionChainData = $node['Build NIFTY Option Chain'].json;\nconst spotPrice = optionChainData.spotPrice;\nconst atmStrike = optionChainData.atmStrike;\nconst ceOptions = optionChainData.ceOptions;\nconst peOptions = optionChainData.peOptions;\n\nlet selectedOption;\nlet orderType;\nlet quantity = 50; // NIFTY lot size\n\n// NIFTY-specific option selection logic\nif (signal === 'BUY_CE') {\n  // Select ATM or slightly OTM CE for NIFTY\n  selectedOption = ceOptions.find(opt => opt.strike === atmStrike) || \n                   ceOptions.find(opt => opt.strike === atmStrike + 50) ||\n                   ceOptions[0];\n  orderType = 'BUY';\n} else if (signal === 'BUY_PE') {\n  // Select ATM or slightly OTM PE for NIFTY\n  selectedOption = peOptions.find(opt => opt.strike === atmStrike) || \n                   peOptions.find(opt => opt.strike === atmStrike - 50) ||\n                   peOptions[0];\n  orderType = 'BUY';\n} else {\n  throw new Error('Invalid signal: ' + signal);\n}\n\nif (!selectedOption) {\n  throw new Error('No suitable NIFTY option found for signal: ' + signal);\n}\n\n// Validate NIFTY option has reasonable premium\nif (selectedOption.ltp < 3) {\n  throw new Error(`NIFTY option premium too low: ${selectedOption.ltp}`);\n}\n\n// Create Dhan order object for NIFTY\nconst dhanOrder = {\n  \"securityId\": selectedOption.securityId,\n  \"exchangeSegment\": \"NSE_FNO\",\n  \"transactionType\": orderType,\n  \"quantity\": quantity,\n  \"orderType\": \"MARKET\",\n  \"productType\": \"INTRADAY\",\n  \"price\": 0,\n  \"triggerPrice\": 0,\n  \"disclosedQuantity\": 0,\n  \"validity\": \"DAY\",\n  \"afterMarketOrder\": false,\n  \"boProfitValue\": 0,\n  \"boStopLossValue\": 0\n};\n\n// Return comprehensive NIFTY order data\nreturn {\n  // Order Details\n  dhanOrder: dhanOrder,\n  selectedOption: selectedOption,\n  signal: signal,\n  orderType: orderType,\n  quantity: quantity,\n  underlying: 'NIFTY',\n  \n  // Market Context\n  spotPrice: spotPrice,\n  atmStrike: atmStrike,\n  selectedStrike: selectedOption.strike,\n  expectedPremium: selectedOption.ltp,\n  \n  // Risk Metrics\n  maxLoss: selectedOption.ltp * quantity,\n  breakeven: selectedOption.optionType === 'CE' ? \n    selectedOption.strike + selectedOption.ltp :\n    selectedOption.strike - selectedOption.ltp,\n  \n  // Additional Info\n  optionType: selectedOption.optionType,\n  expiry: selectedOption.expiry,\n  tradingSymbol: selectedOption.tradingSymbol,\n  lotSize: quantity,\n  timestamp: new Date().toISOString()\n};"
+      },
+      "id": "prepare-nifty-order",
+      "name": "Prepare NIFTY Dhan Order",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3480, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.dhan.co/v2/orders",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "access-token": "{{$node['Dhan Authentication'].json.data.access_token}}"
+        },
+        "body": "={{$node['Prepare NIFTY Dhan Order'].json.dhanOrder}}"
+      },
+      "id": "place-entry-order",
+      "name": "Place NIFTY Entry Order",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [3700, 300]
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "wait-order-fill",
+      "name": "Wait for Order Fill",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [3920, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.dhan.co/v2/orders/{{$node['Place NIFTY Entry Order'].json.data.orderId}}",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "access-token": "{{$node['Dhan Authentication'].json.data.access_token}}"
+        }
+      },
+      "id": "get-order-status",
+      "name": "Get NIFTY Order Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [4140, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enhanced NIFTY SL & Target Calculation for Dhan\nconst orderStatus = $node['Get NIFTY Order Status'].json.data;\nconst orderData = $node['Prepare NIFTY Dhan Order'].json;\n\n// Validate order execution\nif (orderStatus.orderStatus !== 'TRADED') {\n  throw new Error(`NIFTY order not executed. Status: ${orderStatus.orderStatus}`);\n}\n\n// Get execution details\nconst fillPrice = parseFloat(orderStatus.price);\nconst quantity = parseInt(orderStatus.quantity);\nconst securityId = orderStatus.securityId;\nconst tradingSymbol = orderData.selectedOption.tradingSymbol;\n\n// Validate fill price\nif (!fillPrice || fillPrice <= 0) {\n  throw new Error(`Invalid NIFTY fill price: ${fillPrice}`);\n}\n\n// NIFTY-specific SL and Target calculation\nconst niftyStopLossPoints = 12;  // 12 points SL for NIFTY\nconst niftyTargetPoints = 25;    // 25 points target for NIFTY\n\nconst stopLossPrice = Math.max(fillPrice - niftyStopLossPoints, 0.5);\nconst targetPrice = fillPrice + niftyTargetPoints;\n\n// Create Stop Loss Order for NIFTY\nconst stopLossOrder = {\n  \"securityId\": securityId,\n  \"exchangeSegment\": \"NSE_FNO\",\n  \"transactionType\": \"SELL\",\n  \"quantity\": quantity,\n  \"orderType\": \"SL-M\",\n  \"productType\": \"INTRADAY\",\n  \"price\": 0,\n  \"triggerPrice\": stopLossPrice,\n  \"disclosedQuantity\": 0,\n  \"validity\": \"DAY\",\n  \"afterMarketOrder\": false,\n  \"boProfitValue\": 0,\n  \"boStopLossValue\": 0\n};\n\n// Create Target Order for NIFTY\nconst targetOrder = {\n  \"securityId\": securityId,\n  \"exchangeSegment\": \"NSE_FNO\",\n  \"transactionType\": \"SELL\",\n  \"quantity\": quantity,\n  \"orderType\": \"LIMIT\",\n  \"productType\": \"INTRADAY\",\n  \"price\": targetPrice,\n  \"triggerPrice\": 0,\n  \"disclosedQuantity\": 0,\n  \"validity\": \"DAY\",\n  \"afterMarketOrder\": false,\n  \"boProfitValue\": 0,\n  \"boStopLossValue\": 0\n};\n\n// Calculate NIFTY risk metrics\nconst riskAmount = fillPrice - stopLossPrice;\nconst rewardAmount = targetPrice - fillPrice;\nconst riskRewardRatio = riskAmount > 0 ? rewardAmount / riskAmount : 0;\n\n// Return comprehensive NIFTY exit strategy data\nreturn {\n  // Entry Details\n  entryOrderId: orderStatus.orderId,\n  fillPrice: fillPrice,\n  quantity: quantity,\n  securityId: securityId,\n  tradingSymbol: tradingSymbol,\n  underlying: 'NIFTY',\n  \n  // Exit Levels\n  stopLoss: stopLossPrice,\n  target: targetPrice,\n  \n  // Order Objects\n  stopLossOrder: stopLossOrder,\n  targetOrder: targetOrder,\n  \n  // Risk Metrics\n  riskAmount: Math.round(riskAmount * 100) / 100,\n  rewardAmount: Math.round(rewardAmount * 100) / 100,\n  riskRewardRatio: Math.round(riskRewardRatio * 100) / 100,\n  maxLoss: Math.round(riskAmount * quantity * 100) / 100,\n  maxProfit: Math.round(rewardAmount * quantity * 100) / 100,\n  \n  // Execution Details\n  executionTime: orderStatus.createTime,\n  orderStatus: orderStatus.orderStatus,\n  exchangeOrderId: orderStatus.exchangeOrderId,\n  \n  // Timestamp\n  timestamp: new Date().toISOString()\n};"
+      },
+      "id": "calculate-exit-levels",
+      "name": "Calculate NIFTY SL & Target",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4360, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.dhan.co/v2/orders",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "access-token": "{{$node['Dhan Authentication'].json.data.access_token}}"
+        },
+        "body": "={{$node['Calculate NIFTY SL & Target'].json.stopLossOrder}}"
+      },
+      "id": "place-stop-loss",
+      "name": "Place NIFTY Stop Loss",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [4580, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.dhan.co/v2/orders",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "access-token": "{{$node['Dhan Authentication'].json.data.access_token}}"
+        },
+        "body": "={{$node['Calculate NIFTY SL & Target'].json.targetOrder}}"
+      },
+      "id": "place-target-order",
+      "name": "Place NIFTY Target Order",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [4580, 400]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "spreadsheet",
+        "operation": "appendOrUpdate",
+        "documentId": "{{$env.GOOGLE_SHEET_ID}}",
+        "sheetName": "NIFTY_Active_Trades",
+        "dataMode": "defineBelow",
+        "valueInputMode": "raw",
+        "columnToMatchOn": "A",
+        "valueToMatchOn": "={{$node['Calculate NIFTY SL & Target'].json.entryOrderId}}",
+        "fieldsUi": {
+          "values": [
+            {
+              "fieldId": "Entry Order ID",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.entryOrderId}}"
+            },
+            {
+              "fieldId": "SL Order ID",
+              "fieldValue": "={{$node['Place NIFTY Stop Loss'].json.data.orderId}}"
+            },
+            {
+              "fieldId": "Target Order ID",
+              "fieldValue": "={{$node['Place NIFTY Target Order'].json.data.orderId}}"
+            },
+            {
+              "fieldId": "Trading Symbol",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.tradingSymbol}}"
+            },
+            {
+              "fieldId": "Security ID",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.securityId}}"
+            },
+            {
+              "fieldId": "Underlying",
+              "fieldValue": "NIFTY"
+            },
+            {
+              "fieldId": "Entry Price",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.fillPrice}}"
+            },
+            {
+              "fieldId": "Stop Loss",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.stopLoss}}"
+            },
+            {
+              "fieldId": "Target",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.target}}"
+            },
+            {
+              "fieldId": "Quantity",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.quantity}}"
+            },
+            {
+              "fieldId": "Risk Reward Ratio",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.riskRewardRatio}}"
+            },
+            {
+              "fieldId": "Max Loss",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.maxLoss}}"
+            },
+            {
+              "fieldId": "Max Profit",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.maxProfit}}"
+            },
+            {
+              "fieldId": "Status",
+              "fieldValue": "ACTIVE"
+            },
+            {
+              "fieldId": "Timestamp",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.timestamp}}"
+            }
+          ]
+        }
+      },
+      "id": "log-active-trade",
+      "name": "Log NIFTY Active Trade",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [4800, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "spreadsheet",
+        "operation": "appendOrUpdate",
+        "documentId": "{{$env.GOOGLE_SHEET_ID}}",
+        "sheetName": "NIFTY_Trade_Summary",
+        "dataMode": "defineBelow",
+        "valueInputMode": "raw",
+        "columnToMatchOn": "A",
+        "valueToMatchOn": "={{$node['Calculate NIFTY SL & Target'].json.entryOrderId}}",
+        "fieldsUi": {
+          "values": [
+            {
+              "fieldId": "Entry Order ID",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.entryOrderId}}"
+            },
+            {
+              "fieldId": "Timestamp",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.timestamp}}"
+            },
+            {
+              "fieldId": "Signal",
+              "fieldValue": "={{$node['AI NIFTY Trade Confirmation'].json.signal}}"
+            },
+            {
+              "fieldId": "Confidence",
+              "fieldValue": "={{$node['AI NIFTY Trade Confirmation'].json.confidence}}"
+            },
+            {
+              "fieldId": "Trading Symbol",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.tradingSymbol}}"
+            },
+            {
+              "fieldId": "Underlying",
+              "fieldValue": "NIFTY"
+            },
+            {
+              "fieldId": "Entry Price",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.fillPrice}}"
+            },
+            {
+              "fieldId": "Stop Loss",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.stopLoss}}"
+            },
+            {
+              "fieldId": "Target",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.target}}"
+            },
+            {
+              "fieldId": "Quantity",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.quantity}}"
+            },
+            {
+              "fieldId": "Risk Reward Ratio",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.riskRewardRatio}}"
+            },
+            {
+              "fieldId": "Max Loss",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.maxLoss}}"
+            },
+            {
+              "fieldId": "Max Profit",
+              "fieldValue": "={{$node['Calculate NIFTY SL & Target'].json.maxProfit}}"
+            },
+            {
+              "fieldId": "Writers Zone",
+              "fieldValue": "={{$node['NIFTY Writers Zone Analysis'].json.writersZone}}"
+            },
+            {
+              "fieldId": "Market Strength",
+              "fieldValue": "={{$node['Calculate NIFTY Technical Indicators'].json.indicators.marketStrength}}"
+            },
+            {
+              "fieldId": "VIX",
+              "fieldValue": "={{$node['Calculate NIFTY Technical Indicators'].json.indicators.vix}}"
+            },
+            {
+              "fieldId": "Status",
+              "fieldValue": "ACTIVE"
+            }
+          ]
+        }
+      },
+      "id": "log-trade-summary",
+      "name": "Log NIFTY Trade Summary",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [5020, 300]
+    }
+  ],
+  "connections": {
+    "Trading Hours Cron": {
+      "main": [
+        [
+          {
+            "node": "Trading Hours Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trading Hours Filter": {
+      "main": [
+        [
+          {
+            "node": "Dhan Authentication",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dhan Authentication": {
+      "main": [
+        [
+          {
+            "node": "Get NIFTY OHLC Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get NIFTY OHLC Data": {
+      "main": [
+        [
+          {
+            "node": "Get NIFTY LTP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get NIFTY LTP": {
+      "main": [
+        [
+          {
+            "node": "Get India VIX Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get India VIX Data": {
+      "main": [
+        [
+          {
+            "node": "VIX Filter (< 18)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VIX Filter (< 18)": {
+      "main": [
+        [
+          {
+            "node": "Market Sentiment API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Market Sentiment API": {
+      "main": [
+        [
+          {
+            "node": "Get Dhan Instrument Master",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Dhan Instrument Master": {
+      "main": [
+        [
+          {
+            "node": "Build NIFTY Option Chain",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build NIFTY Option Chain": {
+      "main": [
+        [
+          {
+            "node": "Calculate NIFTY Technical Indicators",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate NIFTY Technical Indicators": {
+      "main": [
+        [
+          {
+            "node": "NIFTY Writers Zone Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "NIFTY Writers Zone Analysis": {
+      "main": [
+        [
+          {
+            "node": "AI NIFTY Trade Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI NIFTY Trade Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Signal & Confidence Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signal & Confidence Filter": {
+      "main": [
+        [
+          {
+            "node": "Log NIFTY Signal to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log NIFTY Signal to Sheets": {
+      "main": [
+        [
+          {
+            "node": "Prepare NIFTY Dhan Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare NIFTY Dhan Order": {
+      "main": [
+        [
+          {
+            "node": "Place NIFTY Entry Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Place NIFTY Entry Order": {
+      "main": [
+        [
+          {
+            "node": "Wait for Order Fill",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Order Fill": {
+      "main": [
+        [
+          {
+            "node": "Get NIFTY Order Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get NIFTY Order Status": {
+      "main": [
+        [
+          {
+            "node": "Calculate NIFTY SL & Target",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate NIFTY SL & Target": {
+      "main": [
+        [
+          {
+            "node": "Place NIFTY Stop Loss",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Place NIFTY Target Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Place NIFTY Stop Loss": {
+      "main": [
+        [
+          {
+            "node": "Log NIFTY Active Trade",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Place NIFTY Target Order": {
+      "main": [
+        [
+          {
+            "node": "Log NIFTY Active Trade",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log NIFTY Active Trade": {
+      "main": [
+        [
+          {
+            "node": "Log NIFTY Trade Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1"
+}

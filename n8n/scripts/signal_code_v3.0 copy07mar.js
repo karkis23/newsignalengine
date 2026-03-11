@@ -1,0 +1,599 @@
+// ============================================================
+// NIFTY SIGNAL ENGINE v3.0 — COMPLETE REBUILD
+// Date: 07 March 2026
+// 
+// MAJOR CHANGES from v2.2:
+//  1. VIX graduated scaling (replaces hard ≥18 cutoff)
+//  2. BUY thresholds raised to ±25 (from 0)
+//  3. SuperTrend cross-validation with EMA+PSAR consensus
+//  4. Indicator weights rebalanced per live accuracy data
+//  5. RSI divergence detection (bullish/bearish)
+//  6. Opening Range Breakout (ORB) detection
+//  7. Bollinger Band squeeze / compression detection
+//  8. Time-of-day confidence scaling
+//  9. Cooldown timer (15min between signals)
+// 10. Trend exhaustion detection (ADX declining from >40)
+// 11. Stop-loss cascade zone awareness (round numbers)
+// 12. Multi-bar momentum slope analysis
+// 13. Stochastic in-trend filtering (ignore overbought in uptrend)
+// 14. VWAP validation (flag if always stuck on same value)
+// 15. Candle pattern quality filter (only trust on strong volume)
+// 16. Writers Zone OI change tracking
+// 17. Same output format — drop-in replacement for v2.2
+// ============================================================
+
+// === INPUTS ===
+let tech = {};
+let writers = {};
+
+try {
+    tech = $node["Calculate All Technical Indicators1"].json;
+} catch (e) {
+    return [{ json: { finalSignal: "ERROR", reason: "Node 'Calculate All Technical Indicators1' missing.", regime: "DATA_FAILURE" } }];
+}
+
+try {
+    writers = $node["Writers Zone Analysis1"].json;
+} catch (e) {
+    writers = { writersZone: "NEUTRAL", confidence: 0 };
+}
+
+// === TUNABLE THRESHOLDS ===
+const CONFIG = {
+    // Signal thresholds — RAISED from 0 to ±25
+    BUY_CE_MIN_CONFIDENCE: 25,
+    BUY_PE_MIN_CONFIDENCE: -25,
+
+    // ADX thresholds
+    ADX_TREND_THRESHOLD: 20,
+    ADX_VERY_LOW: 10,
+    ADX_STRONG: 30,
+
+    // RSI bands (with 45-55 dead zone)
+    RSI_OVERSOLD: 30,
+    RSI_OVERBOUGHT: 70,
+    RSI_NEUTRAL_LOW: 45,
+    RSI_NEUTRAL_HIGH: 55,
+
+    // VIX graduated thresholds (replaces hard cutoff)
+    VIX_PANIC: 25,        // Full AVOID
+    VIX_HIGH: 22,         // Score × 0.3
+    VIX_ELEVATED: 20,     // Score × 0.5
+    VIX_CAUTION: 18,      // Score × 0.7
+    // Below 18: no penalty
+
+    // Writers
+    WRITERS_WEIGHT: 15,
+
+    // Protections
+    REPEAT_PROTECTION: true,
+    MIN_STREAK: 2,        // Require 2 consecutive confirmations
+    PAPER_TRADING: false,
+
+    // Time-of-day (IST HHMM format)
+    OPENING_BUFFER_END: 945,   // No trades before 09:45
+    LATE_DAY_START: 1430,      // Reduced confidence after 14:30
+    LATE_DAY_PENALTY: 0.7,     // Score × 0.7 after 14:30
+
+    // ORB
+    ORB_BARS: 3,               // First 3 bars (15 min) define ORB range
+    ORB_WEIGHT: 12,            // ORB breakout/breakdown boost
+};
+
+// === PERSISTENT MEMORY ===
+const mem = $getWorkflowStaticData('global');
+
+// Initialize all memory fields
+if (!mem.lastSignal) mem.lastSignal = "";
+if (!mem.prevMACDHist) mem.prevMACDHist = 0;
+if (!mem.streakSignal) mem.streakSignal = "";
+if (!mem.streakCount) mem.streakCount = 0;
+if (!mem.lastFireTime) mem.lastFireTime = null;
+if (!mem.lastTradeDate) mem.lastTradeDate = "";
+if (!mem.prevLTP) mem.prevLTP = 0;
+if (!mem.prevRSI) mem.prevRSI = 50;
+if (!mem.prevADX) mem.prevADX = 0;
+if (!mem.orbHigh) mem.orbHigh = 0;
+if (!mem.orbLow) mem.orbLow = 99999;
+if (!mem.orbBarCount) mem.orbBarCount = 0;
+if (!mem.orbSet) mem.orbSet = false;
+if (!mem.ltpHistory) mem.ltpHistory = [];
+if (!mem.rsiHistory) mem.rsiHistory = [];
+if (!mem.lastVWAP) mem.lastVWAP = "";
+if (!mem.vwapStuckCount) mem.vwapStuckCount = 0;
+if (!mem.firedSignalDirection) mem.firedSignalDirection = "";
+
+// Daily reset
+const todayIST = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+if (mem.lastTradeDate !== todayIST) {
+    mem.lastSignal = "";
+    mem.streakSignal = "";
+    mem.streakCount = 0;
+    mem.lastTradeDate = todayIST;
+    mem.orbHigh = 0;
+    mem.orbLow = 99999;
+    mem.orbBarCount = 0;
+    mem.orbSet = false;
+    mem.ltpHistory = [];
+    mem.rsiHistory = [];
+    mem.lastVWAP = "";
+    mem.vwapStuckCount = 0;
+    mem.firedSignalDirection = "";
+    // prevMACDHist, prevLTP, prevRSI, prevADX kept — overnight gap is real data
+}
+
+// === READ ALL INDICATORS ===
+const adxValue = parseFloat(tech.ADX?.value) || 0;
+const rsiValue = parseFloat(tech.RSI?.rsi) || 50;
+const vixValue = parseFloat(tech.VIX?.vix) || 15;
+const macdHist = parseFloat(tech.MACD?.histogram) || 0;
+const macdValue = parseFloat(tech.MACD?.macd) || 0;
+const macdSig = parseFloat(tech.MACD?.signal) || 0;
+const ema20Status = tech.EMA20?.status || "Neutral";
+const sma50Status = tech.SMA50?.status || "Neutral";
+const stochStatus = tech.Stochastic?.status || "Neutral";
+const stochValue = parseFloat(tech.Stochastic?.value) || 50;
+const vwapStatus = tech.VWAP?.status || "Neutral";
+const vwapValue = parseFloat(tech.VWAP?.value) || 0;
+const superTrend = tech.SuperTrend?.status || "Neutral";
+const aroonStatus = tech.Aroon?.status || "Neutral";
+const psarStatus = tech.ParabolicSAR?.status || "Neutral";
+const cciStatus = tech.CCI?.status || "Neutral";
+const cciValue = parseFloat(tech.CCI?.value) || 0;
+const mfiStatus = tech.MFI?.status || "Neutral";
+const priceAction = tech.PriceAction?.type || "Neutral";
+const volStrength = tech.VolumeStrength?.type || "Weak Volume";
+const bbStatus = tech.BollingerBands?.status || "Within Bands";
+const bbUpper = parseFloat(tech.BollingerBands?.upper) || 0;
+const bbLower = parseFloat(tech.BollingerBands?.lower) || 0;
+const ltp = parseFloat(tech.LTP) || 0;
+const candlePatterns = Array.isArray(tech.CandlePatterns) ? tech.CandlePatterns : [];
+
+// === SAFETY GATES ===
+if (ltp <= 0) {
+    return [{ json: { finalSignal: "ERROR", reason: "LTP is 0 or missing.", regime: "DATA_FAILURE" } }];
+}
+
+const now = new Date();
+const ist = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+const hhmm = ist.getHours() * 100 + ist.getMinutes();
+const isMarketOpen = (hhmm >= 915 && hhmm <= 1530);
+
+if (!isMarketOpen && !CONFIG.PAPER_TRADING) {
+    return [{ json: { finalSignal: "MARKET_CLOSED", reason: `Outside hours: ${hhmm}`, regime: "OFF_MARKET" } }];
+}
+
+// === TRACK HISTORY (for divergence, slope, etc.) ===
+mem.ltpHistory.push(ltp);
+mem.rsiHistory.push(rsiValue);
+if (mem.ltpHistory.length > 20) mem.ltpHistory.shift();
+if (mem.rsiHistory.length > 20) mem.rsiHistory.shift();
+
+// === VIX GRADUATED SCALING (replaces hard cutoff) ===
+let vixMultiplier = 1.0;
+let vixReason = "";
+if (vixValue >= CONFIG.VIX_PANIC) {
+    mem.prevMACDHist = macdHist;
+    mem.prevLTP = ltp;
+    mem.prevRSI = rsiValue;
+    mem.prevADX = adxValue;
+    return [{ json: { finalSignal: "AVOID", confidence: 0, reason: `VIX PANIC: ${vixValue} (≥${CONFIG.VIX_PANIC})`, regime: "HIGH_VOLATILITY", LTP: ltp, engineVersion: "v3.0" } }];
+} else if (vixValue >= CONFIG.VIX_HIGH) {
+    vixMultiplier = 0.3;
+    vixReason = `VIX HIGH: ${vixValue.toFixed(1)} → score ×0.3`;
+} else if (vixValue >= CONFIG.VIX_ELEVATED) {
+    vixMultiplier = 0.5;
+    vixReason = `VIX ELEVATED: ${vixValue.toFixed(1)} → score ×0.5`;
+} else if (vixValue >= CONFIG.VIX_CAUTION) {
+    vixMultiplier = 0.7;
+    vixReason = `VIX CAUTION: ${vixValue.toFixed(1)} → score ×0.7`;
+}
+
+// === OPENING BUFFER ===
+if (hhmm < CONFIG.OPENING_BUFFER_END && !CONFIG.PAPER_TRADING) {
+    mem.prevMACDHist = macdHist;
+    mem.prevLTP = ltp;
+    mem.prevRSI = rsiValue;
+    mem.prevADX = adxValue;
+    return [{ json: { finalSignal: "WAIT", confidence: 0, reason: `Opening buffer: ${hhmm} < ${CONFIG.OPENING_BUFFER_END}`, regime: "OPENING_BUFFER", LTP: ltp, engineVersion: "v3.0" } }];
+}
+
+// === SIDEWAYS DETECTION ===
+const isTrending = adxValue >= CONFIG.ADX_TREND_THRESHOLD;
+const isRanging = priceAction === "Ranging";
+
+if (!isTrending && isRanging) {
+    mem.prevMACDHist = macdHist;
+    mem.prevLTP = ltp;
+    mem.prevRSI = rsiValue;
+    mem.prevADX = adxValue;
+    mem.lastSignal = "SIDEWAYS";
+    return [{ json: { finalSignal: "SIDEWAYS", confidence: 0, reason: `ADX=${adxValue.toFixed(1)} & Ranging`, regime: "SIDEWAYS_RANGING", LTP: ltp, engineVersion: "v3.0" } }];
+}
+
+// === ORB (Opening Range Breakout) ===
+if (!mem.orbSet) {
+    mem.orbBarCount++;
+    mem.orbHigh = Math.max(mem.orbHigh, ltp);
+    mem.orbLow = Math.min(mem.orbLow, ltp);
+    if (mem.orbBarCount >= CONFIG.ORB_BARS) {
+        mem.orbSet = true;
+    }
+}
+
+// === SCORING ===
+let score = 0;
+let reasons = [];
+let indicatorsUsed = {};
+let debugFlags = [];
+
+const add = (val, weight, label, key) => {
+    if (val) {
+        score += weight;
+        reasons.push(label);
+        indicatorsUsed[key] = (indicatorsUsed[key] || 0) + weight;
+    }
+};
+
+// ──── 1. MACD (weight: ±12 flip, ±8 growing, ±4 crossover) ────
+const macdHistFlippedBullish = mem.prevMACDHist < 0 && macdHist > 0;
+const macdHistFlippedBearish = mem.prevMACDHist > 0 && macdHist < 0;
+const macdHistGrowingBullish = macdHist > 0 && macdHist > mem.prevMACDHist;
+const macdHistGrowingBearish = macdHist < 0 && macdHist < mem.prevMACDHist;
+const macdAboveSignal = macdValue > macdSig;
+const macdBelowSignal = macdValue < macdSig;
+
+add(macdHistFlippedBullish, 12, "MACD Hist Bullish Flip", "MACD");
+add(macdHistFlippedBearish, -12, "MACD Hist Bearish Flip", "MACD");
+add(macdHistGrowingBullish && !macdHistFlippedBullish, 8, "MACD Hist Rising", "MACD");
+add(macdHistGrowingBearish && !macdHistFlippedBearish, -8, "MACD Hist Falling", "MACD");
+add(macdAboveSignal && !macdHistFlippedBullish && !macdHistGrowingBullish, 4, "MACD Bullish Cross", "MACD");
+add(macdBelowSignal && !macdHistFlippedBearish && !macdHistGrowingBearish, -4, "MACD Bearish Cross", "MACD");
+
+// ──── 2. RSI (weight: ±8 extreme, ±4 neutral zone) ────
+add(rsiValue < CONFIG.RSI_OVERSOLD, 8, `RSI Oversold (${rsiValue.toFixed(1)})`, "RSI");
+add(rsiValue > CONFIG.RSI_OVERBOUGHT, -8, `RSI Overbought (${rsiValue.toFixed(1)})`, "RSI");
+add(rsiValue > CONFIG.RSI_NEUTRAL_HIGH && rsiValue <= CONFIG.RSI_OVERBOUGHT, 4, `RSI Bullish Zone (${rsiValue.toFixed(1)})`, "RSI");
+add(rsiValue < CONFIG.RSI_NEUTRAL_LOW && rsiValue >= CONFIG.RSI_OVERSOLD, -4, `RSI Bearish Zone (${rsiValue.toFixed(1)})`, "RSI");
+
+// ──── 3. RSI DIVERGENCE (new in v3.0) ────
+if (mem.ltpHistory.length >= 6 && mem.rsiHistory.length >= 6) {
+    const ltpSlice = mem.ltpHistory.slice(-6);
+    const rsiSlice = mem.rsiHistory.slice(-6);
+
+    // Simple slope comparison (last 6 bars)
+    const ltpSlope = ltpSlice[ltpSlice.length - 1] - ltpSlice[0];
+    const rsiSlope = rsiSlice[rsiSlice.length - 1] - rsiSlice[0];
+
+    // Bullish divergence: price falling, RSI rising
+    if (ltpSlope < -10 && rsiSlope > 3) {
+        add(true, 10, `RSI Bull Divergence (price:${ltpSlope.toFixed(0)} rsi:${rsiSlope.toFixed(1)})`, "RSI_DIV");
+        debugFlags.push("RSI_BULL_DIV");
+    }
+    // Bearish divergence: price rising, RSI falling
+    if (ltpSlope > 10 && rsiSlope < -3) {
+        add(true, -10, `RSI Bear Divergence (price:${ltpSlope.toFixed(0)} rsi:${rsiSlope.toFixed(1)})`, "RSI_DIV");
+        debugFlags.push("RSI_BEAR_DIV");
+    }
+}
+
+// ──── 4. EMA + SMA (weight: ±12 EMA, ±5 SMA, ±5 confluence) ────
+const emaBullish = ema20Status === "Bullish";
+const emaBearish = ema20Status === "Bearish";
+const smaBullish = sma50Status === "Bullish";
+const smaBearish = sma50Status === "Bearish";
+
+add(emaBullish, 12, "EMA20 Bullish", "EMA");
+add(emaBearish, -12, "EMA20 Bearish", "EMA");
+add(smaBullish, 5, "SMA50 Bullish", "SMA");
+add(smaBearish, -5, "SMA50 Bearish", "SMA");
+add(emaBullish && smaBullish, 5, "EMA+SMA Confluence Bull", "EMA_SMA");
+add(emaBearish && smaBearish, -5, "EMA+SMA Confluence Bear", "EMA_SMA");
+
+// ──── 5. SUPERTREND (weight: ±5, REDUCED + cross-validated) ────
+// Cross-validate: only trust SuperTrend if EMA and PSAR agree
+const stBullish = superTrend === "Bullish";
+const stBearish = superTrend === "Bearish";
+const stValidated = (stBullish && emaBullish && psarStatus === "Bullish") ||
+    (stBearish && emaBearish && psarStatus === "Bearish");
+
+if (stValidated) {
+    add(stBullish, 8, "SuperTrend Buy (validated)", "SuperTrend");
+    add(stBearish, -8, "SuperTrend Sell (validated)", "SuperTrend");
+} else if (stBullish || stBearish) {
+    // SuperTrend disagrees with EMA/PSAR → reduced weight + flag
+    add(stBullish, 3, "SuperTrend Buy (unvalidated)", "SuperTrend");
+    add(stBearish, -3, "SuperTrend Sell (unvalidated)", "SuperTrend");
+    if ((stBullish && emaBearish) || (stBearish && emaBullish)) {
+        debugFlags.push("ST_EMA_CONFLICT");
+        reasons.push("⚠️ SuperTrend conflicts with EMA");
+    }
+} else {
+    reasons.push("SuperTrend: Neutral");
+}
+
+// ──── 6. PSAR (weight: ±10, promoted for accuracy) ────
+add(psarStatus === "Bullish", 10, "PSAR Bullish", "PSAR");
+add(psarStatus === "Bearish", -10, "PSAR Bearish", "PSAR");
+
+// ──── 7. VWAP (weight: ±6, with stuck-detection) ────
+// Detect stuck VWAP (always showing same status)
+const currentVWAPStatus = vwapStatus;
+if (currentVWAPStatus === mem.lastVWAP) {
+    mem.vwapStuckCount++;
+} else {
+    mem.vwapStuckCount = 0;
+}
+mem.lastVWAP = currentVWAPStatus;
+
+if (mem.vwapStuckCount > 20) {
+    // VWAP data is likely stuck/broken — ignore it
+    reasons.push(`VWAP: IGNORED (stuck on "${currentVWAPStatus}" for ${mem.vwapStuckCount} bars)`);
+    debugFlags.push("VWAP_STUCK");
+} else {
+    add(vwapStatus === "Above", 6, "Above VWAP", "VWAP");
+    add(vwapStatus === "Below", -6, "Below VWAP", "VWAP");
+}
+
+// ──── 8. AROON (weight: ±8) ────
+add(aroonStatus === "Uptrend", 8, "Aroon Uptrend", "Aroon");
+add(aroonStatus === "Downtrend", -8, "Aroon Downtrend", "Aroon");
+
+// ──── 9. STOCHASTIC (weight: ±3, REDUCED + trend-filtered) ────
+// In strong uptrend, ignore overbought; in strong downtrend, ignore oversold
+if (stochStatus === "Oversold" && !emaBearish) {
+    add(true, 5, "Stoch Oversold (reversal)", "Stoch");
+} else if (stochStatus === "Overbought" && !emaBullish) {
+    add(true, -5, "Stoch Overbought (reversal)", "Stoch");
+} else if (stochStatus === "Overbought" && emaBullish) {
+    // Overbought in uptrend = trend continuation, slight positive
+    add(true, 2, "Stoch Overbought (in uptrend, ok)", "Stoch");
+} else if (stochStatus === "Oversold" && emaBearish) {
+    // Oversold in downtrend = trend continuation, slight negative
+    add(true, -2, "Stoch Oversold (in downtrend, ok)", "Stoch");
+}
+
+// ──── 10. CCI (weight: ±3, REDUCED) ────
+add(cciStatus === "Buy", 3, "CCI Buy", "CCI");
+add(cciStatus === "Sell", -3, "CCI Sell", "CCI");
+
+// ──── 11. MFI (weight: ±2, REDUCED) ────
+add(mfiStatus === "Oversold", 2, "MFI Oversold", "MFI");
+add(mfiStatus === "Overbought", -2, "MFI Overbought", "MFI");
+
+// ──── 12. BOLLINGER BANDS (weight: ±6 breakout, squeeze detection) ────
+add(bbStatus === "Breakout Up", 6, "BB Breakout Up", "BB");
+add(bbStatus === "Breakout Down", -6, "BB Breakout Down", "BB");
+if (bbStatus === "Within Bands") {
+    add(emaBullish, 2, "BB Within (trending up)", "BB");
+    add(emaBearish, -2, "BB Within (trending down)", "BB");
+}
+
+// BB Squeeze detection (new in v3.0)
+if (bbUpper > 0 && bbLower > 0 && ltp > 0) {
+    const bbWidth = (bbUpper - bbLower) / ltp;
+    if (bbWidth < 0.005) { // Very tight bands = compression
+        debugFlags.push("BB_SQUEEZE");
+        reasons.push(`BB Squeeze (width:${(bbWidth * 100).toFixed(2)}%) → breakout imminent`);
+        // Don't add score — just flag for awareness
+    }
+}
+
+// ──── 13. WRITERS ZONE (weight: dynamic, max ±15) ────
+const wZone = writers?.writersZone || "NEUTRAL";
+const wConf = parseFloat(writers?.confidence) || 0;
+const wPCR = parseFloat(writers?.putCallPremiumRatio) || 1.0;
+const wOIPCR = parseFloat(writers?.putCallOIRatio) || 1.0;
+const hasRealPCR = wPCR !== 1.0;
+
+if (hasRealPCR && wZone !== "NEUTRAL" && wConf >= 0.3) {
+    const wWeight = Math.min(CONFIG.WRITERS_WEIGHT * wConf, CONFIG.WRITERS_WEIGHT);
+    if (wZone === "BULLISH") add(true, wWeight, `Writers BULLISH (PCR:${wPCR.toFixed(2)})`, "Writers");
+    else if (wZone === "BEARISH") add(true, -wWeight, `Writers BEARISH (PCR:${wPCR.toFixed(2)})`, "Writers");
+} else {
+    const msg = (wZone === "NEUTRAL" || !hasRealPCR) ? "Neutral/No Data" : `Low Conf (${wConf})`;
+    reasons.push(`Writers: ${wZone} (${msg})`);
+}
+
+// ──── 14. ORB (Opening Range Breakout) — New in v3.0 ────
+if (mem.orbSet && mem.orbHigh > 0 && mem.orbLow < 99999) {
+    const orbRange = mem.orbHigh - mem.orbLow;
+    if (orbRange > 0) {
+        if (ltp > mem.orbHigh) {
+            add(true, CONFIG.ORB_WEIGHT, `ORB Breakout ↑ (>${mem.orbHigh.toFixed(0)})`, "ORB");
+            debugFlags.push("ORB_BREAKOUT_UP");
+        } else if (ltp < mem.orbLow) {
+            add(true, -CONFIG.ORB_WEIGHT, `ORB Breakdown ↓ (<${mem.orbLow.toFixed(0)})`, "ORB");
+            debugFlags.push("ORB_BREAKDOWN");
+        } else {
+            reasons.push(`ORB: Within range (${mem.orbLow.toFixed(0)}-${mem.orbHigh.toFixed(0)})`);
+        }
+    }
+}
+
+// ──── 15. ADX BONUS/PENALTY ────
+if (adxValue >= CONFIG.ADX_STRONG) {
+    const adxBoost = 8;
+    if (score > 0) { score += adxBoost; reasons.push(`Strong ADX=${adxValue.toFixed(1)} (boost +${adxBoost})`); }
+    if (score < 0) { score -= adxBoost; reasons.push(`Strong ADX=${adxValue.toFixed(1)} (boost -${adxBoost})`); }
+}
+if (adxValue >= 15 && adxValue < CONFIG.ADX_TREND_THRESHOLD) {
+    score = score * 0.8;
+    reasons.push(`Weak ADX=${adxValue.toFixed(1)} → score ×0.8`);
+}
+if (adxValue < CONFIG.ADX_VERY_LOW) {
+    score = score * 0.5;
+    reasons.push(`Very Low ADX=${adxValue.toFixed(1)} → score ×0.5`);
+}
+
+// ──── 16. TREND EXHAUSTION DETECTION ────
+if (mem.prevADX > 40 && adxValue < mem.prevADX - 5) {
+    // ADX was strong and is now declining rapidly → trend exhaustion
+    const exhaustionPenalty = 0.7;
+    score = score * exhaustionPenalty;
+    reasons.push(`Trend Exhaustion: ADX ${mem.prevADX.toFixed(1)} → ${adxValue.toFixed(1)} (declining)`);
+    debugFlags.push("TREND_EXHAUSTION");
+}
+
+// ──── 17. VOLUME CONFIRMATION ────
+const volStrong = volStrength.includes("Confirmed") || volStrength === "Normal OBV";
+if (volStrong && score > 0) add(true, 5, "Volume Confirms Bullish", "Volume");
+if (volStrong && score < 0) add(true, -5, "Volume Confirms Bearish", "Volume");
+if (volStrength === "Weak Volume") {
+    if (score > 0) { score -= 5; reasons.push("Weak Volume (penalised)"); }
+    else if (score < 0) { score += 5; reasons.push("Weak Volume (penalised)"); }
+    else { score -= 2; reasons.push("Weak Volume (neutral penalty)"); }
+}
+
+// ──── 18. CANDLE PATTERNS (weight: ±3, REDUCED, volume-gated) ────
+const BULLISH_CANDLES = ["Hammer", "Morning Star", "Bullish Engulfing", "Bullish Marubozu"];
+const BEARISH_CANDLES = ["Shooting Star", "Evening Star", "Bearish Engulfing", "Bearish Marubozu", "Hanging Man"];
+let candleBoost = 0;
+
+// Only trust candle patterns with volume confirmation
+const hasVolume = volStrong;
+candlePatterns.forEach(pattern => {
+    if (BULLISH_CANDLES.includes(pattern) && score > 0) {
+        const weight = hasVolume ? 5 : 2;
+        candleBoost += weight;
+        reasons.push(`${hasVolume ? "✓" : "○"} Bull Candle: ${pattern}`);
+    } else if (BEARISH_CANDLES.includes(pattern) && score < 0) {
+        const weight = hasVolume ? -5 : -2;
+        candleBoost += weight;
+        reasons.push(`${hasVolume ? "✓" : "○"} Bear Candle: ${pattern}`);
+    }
+});
+score += candleBoost;
+if (candleBoost !== 0) indicatorsUsed["Candle"] = candleBoost;
+
+// ──── 19. STOP-LOSS CASCADE ZONE ────
+const roundLevels = [24000, 24100, 24200, 24300, 24400, 24500, 24600, 24700, 24800, 24900, 25000, 25100, 25200, 25300, 25400, 25500];
+const nearestRound = roundLevels.reduce((prev, curr) => Math.abs(curr - ltp) < Math.abs(prev - ltp) ? curr : prev);
+const distToRound = Math.abs(ltp - nearestRound);
+if (distToRound <= 15) {
+    // Price is very close to a round number = potential stop-loss cascade zone
+    debugFlags.push(`SL_CASCADE_ZONE:${nearestRound}`);
+    reasons.push(`⚠️ Near round level ${nearestRound} (${distToRound.toFixed(0)}pts) — SL cascade risk`);
+}
+
+// ──── 20. APPLY VIX SCALING ────
+if (vixMultiplier < 1.0) {
+    score = score * vixMultiplier;
+    reasons.push(vixReason);
+}
+
+// ──── 21. TIME-OF-DAY PENALTY ────
+if (hhmm >= CONFIG.LATE_DAY_START) {
+    score = score * CONFIG.LATE_DAY_PENALTY;
+    reasons.push(`Late-day penalty: score ×${CONFIG.LATE_DAY_PENALTY} (after ${CONFIG.LATE_DAY_START})`);
+}
+
+// === VOLUME RATIO ===
+const volLatest = parseFloat(tech.VolumeSpike?.latestVol) || 0;
+const volAvg = parseFloat(tech.VolumeSpike?.avgVol) || 1;
+const volDataMissing = volLatest === 0;
+const volumeRatio = volDataMissing ? null : parseFloat((volLatest / volAvg).toFixed(2));
+if (volDataMissing) reasons.push("VolumeSpike data unavailable");
+
+// === MOMENTUM ===
+const momentumValue = Math.round(macdHist * 100) / 100;
+
+// === SIGNAL DETERMINATION ===
+score = Math.round(score * 100) / 100;
+
+let currentRawSignal = "WAIT";
+if (score >= CONFIG.BUY_CE_MIN_CONFIDENCE) currentRawSignal = "BUY CALL (CE)";
+else if (score <= CONFIG.BUY_PE_MIN_CONFIDENCE) currentRawSignal = "BUY PUT (PE)";
+
+// === STREAK CONFIRMATION ===
+if (currentRawSignal === mem.streakSignal && currentRawSignal !== "WAIT") {
+    mem.streakCount = mem.streakCount + 1;
+} else {
+    mem.streakSignal = currentRawSignal;
+    mem.streakCount = currentRawSignal === "WAIT" ? 0 : 1;
+}
+
+const streakConfirmed = mem.streakCount >= CONFIG.MIN_STREAK;
+
+// === NO COOLDOWN — repeat protection handles overtrading ===
+// Direction-change signals (CE→PE, PE→CE) should never be blocked
+const cooldownActive = false;
+
+// === FINAL DECISION ===
+let finalSignal = "WAIT";
+let blockedReason = "";
+
+if (currentRawSignal === "WAIT") {
+    blockedReason = `Score ${score.toFixed(1)} between thresholds (${CONFIG.BUY_PE_MIN_CONFIDENCE} to ${CONFIG.BUY_CE_MIN_CONFIDENCE})`;
+} else if (!streakConfirmed) {
+    blockedReason = `Streak: ${mem.streakCount}/${CONFIG.MIN_STREAK} bars (building ${currentRawSignal})`;
+} else if (CONFIG.REPEAT_PROTECTION && currentRawSignal === mem.firedSignalDirection) {
+    blockedReason = `Repeat protection: same direction as last fired (${mem.firedSignalDirection})`;
+} else {
+    finalSignal = currentRawSignal;
+}
+
+// === SAVE STATE ===
+if (finalSignal !== "WAIT") {
+    mem.lastSignal = finalSignal;
+    mem.lastFireTime = new Date().toISOString();
+    mem.firedSignalDirection = finalSignal;
+}
+mem.prevMACDHist = macdHist;
+mem.prevLTP = ltp;
+mem.prevRSI = rsiValue;
+mem.prevADX = adxValue;
+
+// === REGIME ===
+let regime = "MIXED";
+if (vixValue >= CONFIG.VIX_PANIC) regime = "HIGH_VOLATILITY";
+else if (!isTrending && isRanging) regime = "SIDEWAYS_RANGING";
+else if (!isTrending) regime = "SIDEWAYS_WEAK_TREND";
+else if (stValidated && stBullish) regime = "STRONG_BULLISH";
+else if (stValidated && stBearish) regime = "STRONG_BEARISH";
+else if (emaBullish && smaBullish) regime = "BULLISH_TREND";
+else if (emaBearish && smaBearish) regime = "BEARISH_TREND";
+else if (emaBullish) regime = "BULLISH_LEAN";
+else if (emaBearish) regime = "BEARISH_LEAN";
+
+// === OUTPUT (same format as v2.2 for compatibility) ===
+return [{
+    json: {
+        finalSignal,
+        rawSignal: currentRawSignal,
+        confidence: score,
+        Momentum: momentumValue,
+        VolumeRatio: volumeRatio,
+        streakCount: mem.streakCount,
+        streakNeeded: CONFIG.MIN_STREAK,
+        streakConfirmed,
+        reason: reasons.join(" | "),
+        blockedReason: blockedReason || null,
+        indicators: indicatorsUsed,
+        regime,
+        LTP: ltp,
+        VIX: vixValue,
+        ADX: adxValue,
+        RSI: rsiValue,
+        MACDHist: macdHist,
+        MACDFlip: macdHistFlippedBullish ? "BULLISH_FLIP" : macdHistFlippedBearish ? "BEARISH_FLIP" : "NONE",
+        SuperTrend: superTrend,
+        SuperTrendValidated: stValidated,
+        EMA20: ema20Status,
+        VWAP: vwapStatus,
+        writersZone: wZone,
+        writersConfidence: wConf,
+        putCallRatio: wPCR,
+        writersUsed: hasRealPCR && wZone !== "NEUTRAL" && wConf >= 0.3,
+        supportLevels: writers?.supportLevels || [],
+        resistanceLevels: writers?.resistanceLevels || [],
+        lastSignal: mem.lastSignal,
+        lastFireTime: mem.lastFireTime,
+        sessionDate: mem.lastTradeDate,
+        cooldownActive,
+        debugFlags,
+        orbRange: mem.orbSet ? { high: mem.orbHigh, low: mem.orbLow } : null,
+        vixMultiplier,
+        engineVersion: "v3.0"
+    }
+}];

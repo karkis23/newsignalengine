@@ -1,0 +1,529 @@
+{
+  "name": "NIFTY Exit Order Monitor - Auto Cancel Opposite Order (Dhan API)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/2 9-15 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "monitor-cron",
+      "name": "Monitor Every 2 Minutes",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [180, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.dhan.co/login",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        "body": {
+          "userId": "{{$env.DHAN_CLIENT_ID}}",
+          "password": "{{$env.DHAN_PASSWORD}}",
+          "twoFA": "{{$env.DHAN_2FA}}",
+          "appName": "WEB"
+        }
+      },
+      "id": "dhan-login-monitor",
+      "name": "Dhan Authentication",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.dhan.co/v2/orders",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "access-token": "{{$node['Dhan Authentication'].json.data.access_token}}"
+        }
+      },
+      "id": "get-order-book",
+      "name": "Get Dhan Order Book",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [620, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "spreadsheet",
+        "operation": "read",
+        "documentId": "{{$env.GOOGLE_SHEET_ID}}",
+        "sheetName": "NIFTY_Active_Trades",
+        "options": {}
+      },
+      "id": "get-active-trades",
+      "name": "Get Active NIFTY Trades",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [840, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enhanced NIFTY Exit Order Monitor for Dhan API\nconst orderBook = $node['Get Dhan Order Book'].json.data || [];\nconst activeTrades = $node['Get Active NIFTY Trades'].json || [];\nconst accessToken = $node['Dhan Authentication'].json.data.access_token;\n\nconst results = [];\nconst ordersToCancel = [];\nconst tradesToUpdate = [];\nconst notifications = [];\n\n// Process each active NIFTY trade\nactiveTrades.forEach(tradeRow => {\n  if (tradeRow.Status !== 'ACTIVE' || tradeRow.Underlying !== 'NIFTY') return;\n  \n  const entryOrderId = tradeRow['Entry Order ID'];\n  const slOrderId = tradeRow['SL Order ID'];\n  const targetOrderId = tradeRow['Target Order ID'];\n  const tradingSymbol = tradeRow['Trading Symbol'];\n  const entryPrice = parseFloat(tradeRow['Entry Price']);\n  const quantity = parseInt(tradeRow['Quantity']);\n  \n  // Find these orders in the current order book\n  const slOrder = orderBook.find(order => order.orderId === slOrderId);\n  const targetOrder = orderBook.find(order => order.orderId === targetOrderId);\n  \n  let executedOrder = null;\n  let orderToCancel = null;\n  let exitType = null;\n  let exitPrice = null;\n  let pnl = 0;\n  \n  // Check if SL order is executed\n  if (slOrder && slOrder.orderStatus === 'TRADED') {\n    executedOrder = slOrder;\n    orderToCancel = targetOrderId;\n    exitType = 'STOP_LOSS';\n    exitPrice = parseFloat(slOrder.price);\n    pnl = (exitPrice - entryPrice) * quantity;\n    \n    notifications.push({\n      type: 'NIFTY_STOP_LOSS_HIT',\n      message: `NIFTY Stop Loss executed for ${tradingSymbol} at ₹${exitPrice}`,\n      pnl: pnl,\n      severity: pnl < 0 ? 'HIGH' : 'MEDIUM',\n      underlying: 'NIFTY'\n    });\n  }\n  // Check if Target order is executed\n  else if (targetOrder && targetOrder.orderStatus === 'TRADED') {\n    executedOrder = targetOrder;\n    orderToCancel = slOrderId;\n    exitType = 'TARGET';\n    exitPrice = parseFloat(targetOrder.price);\n    pnl = (exitPrice - entryPrice) * quantity;\n    \n    notifications.push({\n      type: 'NIFTY_TARGET_ACHIEVED',\n      message: `NIFTY Target achieved for ${tradingSymbol} at ₹${exitPrice}`,\n      pnl: pnl,\n      severity: 'LOW',\n      underlying: 'NIFTY'\n    });\n  }\n  // Check for partial executions or pending status changes\n  else {\n    // Monitor for any status changes that might need attention\n    if (slOrder && slOrder.orderStatus === 'REJECTED') {\n      notifications.push({\n        type: 'NIFTY_SL_ORDER_REJECTED',\n        message: `NIFTY SL order rejected for ${tradingSymbol}`,\n        severity: 'HIGH',\n        underlying: 'NIFTY'\n      });\n    }\n    \n    if (targetOrder && targetOrder.orderStatus === 'REJECTED') {\n      notifications.push({\n        type: 'NIFTY_TARGET_ORDER_REJECTED',\n        message: `NIFTY Target order rejected for ${tradingSymbol}`,\n        severity: 'HIGH',\n        underlying: 'NIFTY'\n      });\n    }\n  }\n  \n  if (executedOrder && orderToCancel) {\n    // Add order to cancel list\n    ordersToCancel.push({\n      orderId: orderToCancel,\n      tradingSymbol: tradingSymbol,\n      underlying: 'NIFTY'\n    });\n    \n    // Calculate additional NIFTY-specific metrics\n    const riskAmount = Math.abs(entryPrice - parseFloat(tradeRow['Stop Loss']));\n    const rewardAmount = Math.abs(parseFloat(tradeRow['Target']) - entryPrice);\n    const actualRR = exitType === 'TARGET' ? \n      Math.abs(pnl) / (riskAmount * quantity) : \n      -Math.abs(pnl) / (riskAmount * quantity);\n    \n    // Update trade information\n    tradesToUpdate.push({\n      entryOrderId: entryOrderId,\n      exitType: exitType,\n      exitPrice: exitPrice,\n      pnl: Math.round(pnl * 100) / 100,\n      executedOrderId: executedOrder.orderId,\n      actualRiskReward: Math.round(actualRR * 100) / 100,\n      executionTime: executedOrder.updateTime || new Date().toISOString(),\n      timestamp: new Date().toISOString(),\n      underlying: 'NIFTY'\n    });\n    \n    results.push({\n      message: `NIFTY ${exitType} executed for ${tradingSymbol}`,\n      entryOrderId: entryOrderId,\n      tradingSymbol: tradingSymbol,\n      exitPrice: exitPrice,\n      pnl: pnl,\n      cancelOrderId: orderToCancel,\n      exitType: exitType,\n      underlying: 'NIFTY'\n    });\n  }\n});\n\n// Calculate NIFTY session statistics\nconst sessionStats = {\n  totalExecutions: results.length,\n  totalPnL: tradesToUpdate.reduce((sum, trade) => sum + trade.pnl, 0),\n  targetHits: tradesToUpdate.filter(t => t.exitType === 'TARGET').length,\n  stopLossHits: tradesToUpdate.filter(t => t.exitType === 'STOP_LOSS').length,\n  avgPnL: tradesToUpdate.length > 0 ? \n    tradesToUpdate.reduce((sum, trade) => sum + trade.pnl, 0) / tradesToUpdate.length : 0,\n  underlying: 'NIFTY'\n};\n\nreturn {\n  results,\n  ordersToCancel,\n  tradesToUpdate,\n  notifications,\n  sessionStats,\n  totalExecutions: results.length,\n  timestamp: new Date().toISOString()\n};"
+      },
+      "id": "analyze-exits",
+      "name": "Analyze NIFTY Exit Executions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1060, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "{{$node['Analyze NIFTY Exit Executions'].json.totalExecutions}}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "check-executions",
+      "name": "Check if Any NIFTY Exits Executed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1280, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare NIFTY order cancellations with enhanced error handling\nconst ordersToCancel = $node['Analyze NIFTY Exit Executions'].json.ordersToCancel;\nconst cancelResults = [];\n\nfor (const order of ordersToCancel) {\n  cancelResults.push({\n    orderId: order.orderId,\n    tradingSymbol: order.tradingSymbol,\n    underlying: order.underlying,\n    timestamp: new Date().toISOString()\n  });\n}\n\nreturn cancelResults;"
+      },
+      "id": "prepare-cancellations",
+      "name": "Prepare NIFTY Order Cancellations",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "method": "DELETE",
+        "url": "https://api.dhan.co/v2/orders/{{$json.orderId}}",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "access-token": "{{$node['Dhan Authentication'].json.data.access_token}}"
+        }
+      },
+      "id": "cancel-opposite-orders",
+      "name": "Cancel Opposite NIFTY Orders",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1720, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "spreadsheet",
+        "operation": "update",
+        "documentId": "{{$env.GOOGLE_SHEET_ID}}",
+        "sheetName": "NIFTY_Active_Trades",
+        "columnToMatchOn": "A",
+        "valueToMatchOn": "={{$json.entryOrderId}}",
+        "fieldsUi": {
+          "values": [
+            {
+              "fieldId": "Status",
+              "fieldValue": "COMPLETED"
+            },
+            {
+              "fieldId": "Exit Type",
+              "fieldValue": "={{$json.exitType}}"
+            },
+            {
+              "fieldId": "Exit Price",
+              "fieldValue": "={{$json.exitPrice}}"
+            },
+            {
+              "fieldId": "PnL",
+              "fieldValue": "={{$json.pnl}}"
+            },
+            {
+              "fieldId": "Actual Risk Reward",
+              "fieldValue": "={{$json.actualRiskReward}}"
+            },
+            {
+              "fieldId": "Exit Timestamp",
+              "fieldValue": "={{$json.timestamp}}"
+            },
+            {
+              "fieldId": "Execution Time",
+              "fieldValue": "={{$json.executionTime}}"
+            }
+          ]
+        }
+      },
+      "id": "update-active-trade-status",
+      "name": "Update NIFTY Active Trade Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1940, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "spreadsheet",
+        "operation": "update",
+        "documentId": "{{$env.GOOGLE_SHEET_ID}}",
+        "sheetName": "NIFTY_Trade_Summary",
+        "columnToMatchOn": "A",
+        "valueToMatchOn": "={{$json.entryOrderId}}",
+        "fieldsUi": {
+          "values": [
+            {
+              "fieldId": "Status",
+              "fieldValue": "CLOSED"
+            },
+            {
+              "fieldId": "Exit Price",
+              "fieldValue": "={{$json.exitPrice}}"
+            },
+            {
+              "fieldId": "PnL",
+              "fieldValue": "={{$json.pnl}}"
+            },
+            {
+              "fieldId": "Exit Type",
+              "fieldValue": "={{$json.exitType}}"
+            },
+            {
+              "fieldId": "Actual Risk Reward",
+              "fieldValue": "={{$json.actualRiskReward}}"
+            },
+            {
+              "fieldId": "Exit Timestamp",
+              "fieldValue": "={{$json.timestamp}}"
+            }
+          ]
+        }
+      },
+      "id": "update-trade-summary",
+      "name": "Update NIFTY Trade Summary",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [2160, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "spreadsheet",
+        "operation": "appendOrUpdate",
+        "documentId": "{{$env.GOOGLE_SHEET_ID}}",
+        "sheetName": "NIFTY_Performance_Log",
+        "dataMode": "defineBelow",
+        "valueInputMode": "raw",
+        "columnToMatchOn": "A",
+        "valueToMatchOn": "={{new Date().toISOString().split('T')[0]}}",
+        "fieldsUi": {
+          "values": [
+            {
+              "fieldId": "Date",
+              "fieldValue": "={{new Date().toISOString().split('T')[0]}}"
+            },
+            {
+              "fieldId": "Underlying",
+              "fieldValue": "NIFTY"
+            },
+            {
+              "fieldId": "Session Executions",
+              "fieldValue": "={{$node['Analyze NIFTY Exit Executions'].json.sessionStats.totalExecutions}}"
+            },
+            {
+              "fieldId": "Session PnL",
+              "fieldValue": "={{$node['Analyze NIFTY Exit Executions'].json.sessionStats.totalPnL}}"
+            },
+            {
+              "fieldId": "Target Hits",
+              "fieldValue": "={{$node['Analyze NIFTY Exit Executions'].json.sessionStats.targetHits}}"
+            },
+            {
+              "fieldId": "Stop Loss Hits",
+              "fieldValue": "={{$node['Analyze NIFTY Exit Executions'].json.sessionStats.stopLossHits}}"
+            },
+            {
+              "fieldId": "Average PnL",
+              "fieldValue": "={{$node['Analyze NIFTY Exit Executions'].json.sessionStats.avgPnL}}"
+            },
+            {
+              "fieldId": "Last Update",
+              "fieldValue": "={{new Date().toISOString()}}"
+            }
+          ]
+        }
+      },
+      "id": "log-session-performance",
+      "name": "Log NIFTY Session Performance",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [2380, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{$node['Analyze NIFTY Exit Executions'].json.notifications.length}}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "check-notifications",
+      "name": "Check for NIFTY Notifications",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1280, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process NIFTY notifications and alerts\nconst notifications = $node['Analyze NIFTY Exit Executions'].json.notifications;\nconst sessionStats = $node['Analyze NIFTY Exit Executions'].json.sessionStats;\n\nconst alerts = [];\nconst highPriorityAlerts = [];\n\nnotifications.forEach(notification => {\n  const alert = {\n    timestamp: new Date().toISOString(),\n    type: notification.type,\n    message: notification.message,\n    severity: notification.severity,\n    pnl: notification.pnl || 0,\n    underlying: 'NIFTY'\n  };\n  \n  alerts.push(alert);\n  \n  // High priority alerts for NIFTY\n  if (notification.severity === 'HIGH') {\n    highPriorityAlerts.push(alert);\n  }\n});\n\n// Add NIFTY session summary if significant activity\nif (sessionStats.totalExecutions > 0) {\n  const summaryAlert = {\n    timestamp: new Date().toISOString(),\n    type: 'NIFTY_SESSION_SUMMARY',\n    message: `NIFTY Session Update: ${sessionStats.totalExecutions} executions, Total PnL: ₹${sessionStats.totalPnL.toFixed(2)}`,\n    severity: sessionStats.totalPnL >= 0 ? 'LOW' : 'MEDIUM',\n    sessionStats: sessionStats,\n    underlying: 'NIFTY'\n  };\n  \n  alerts.push(summaryAlert);\n}\n\nreturn {\n  alerts,\n  highPriorityAlerts,\n  totalAlerts: alerts.length,\n  highPriorityCount: highPriorityAlerts.length\n};"
+      },
+      "id": "process-notifications",
+      "name": "Process NIFTY Notifications",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1500, 500]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "{{$env.SLACK_WEBHOOK_URL}}",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "text": "🎯 *NIFTY Trading Bot Alert*",
+          "blocks": [
+            {
+              "type": "section",
+              "text": {
+                "type": "mrkdwn",
+                "text": "*Underlying:* NIFTY\\n*Alert Type:* {{$json.type}}\\n*Severity:* {{$json.severity}}\\n*Message:* {{$json.message}}\\n*Time:* {{$json.timestamp}}"
+              }
+            }
+          ]
+        }
+      },
+      "id": "send-slack-alerts",
+      "name": "Send NIFTY Slack Alerts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1720, 500]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "spreadsheet",
+        "operation": "appendOrUpdate",
+        "documentId": "{{$env.GOOGLE_SHEET_ID}}",
+        "sheetName": "NIFTY_Alert_Log",
+        "dataMode": "defineBelow",
+        "valueInputMode": "raw",
+        "columnToMatchOn": "A",
+        "valueToMatchOn": "={{$json.timestamp}}",
+        "fieldsUi": {
+          "values": [
+            {
+              "fieldId": "Timestamp",
+              "fieldValue": "={{$json.timestamp}}"
+            },
+            {
+              "fieldId": "Underlying",
+              "fieldValue": "NIFTY"
+            },
+            {
+              "fieldId": "Alert Type",
+              "fieldValue": "={{$json.type}}"
+            },
+            {
+              "fieldId": "Severity",
+              "fieldValue": "={{$json.severity}}"
+            },
+            {
+              "fieldId": "Message",
+              "fieldValue": "={{$json.message}}"
+            },
+            {
+              "fieldId": "PnL",
+              "fieldValue": "={{$json.pnl}}"
+            }
+          ]
+        }
+      },
+      "id": "log-alerts",
+      "name": "Log NIFTY Alerts to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1940, 500]
+    }
+  ],
+  "connections": {
+    "Monitor Every 2 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Dhan Authentication",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dhan Authentication": {
+      "main": [
+        [
+          {
+            "node": "Get Dhan Order Book",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Dhan Order Book": {
+      "main": [
+        [
+          {
+            "node": "Get Active NIFTY Trades",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Active NIFTY Trades": {
+      "main": [
+        [
+          {
+            "node": "Analyze NIFTY Exit Executions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze NIFTY Exit Executions": {
+      "main": [
+        [
+          {
+            "node": "Check if Any NIFTY Exits Executed",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Check for NIFTY Notifications",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if Any NIFTY Exits Executed": {
+      "main": [
+        [
+          {
+            "node": "Prepare NIFTY Order Cancellations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare NIFTY Order Cancellations": {
+      "main": [
+        [
+          {
+            "node": "Cancel Opposite NIFTY Orders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cancel Opposite NIFTY Orders": {
+      "main": [
+        [
+          {
+            "node": "Update NIFTY Active Trade Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update NIFTY Active Trade Status": {
+      "main": [
+        [
+          {
+            "node": "Update NIFTY Trade Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update NIFTY Trade Summary": {
+      "main": [
+        [
+          {
+            "node": "Log NIFTY Session Performance",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check for NIFTY Notifications": {
+      "main": [
+        [
+          {
+            "node": "Process NIFTY Notifications",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process NIFTY Notifications": {
+      "main": [
+        [
+          {
+            "node": "Send NIFTY Slack Alerts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send NIFTY Slack Alerts": {
+      "main": [
+        [
+          {
+            "node": "Log NIFTY Alerts to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1"
+}

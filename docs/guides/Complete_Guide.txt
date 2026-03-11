@@ -1,0 +1,1330 @@
+# COMPLETE NO-CODE INTRADAY OPTIONS TRADING BOT SETUP GUIDE
+# ================================================================
+
+## TABLE OF CONTENTS
+## ================
+1. SYSTEM OVERVIEW
+2. PREREQUISITES & REQUIREMENTS
+3. STEP-BY-STEP SETUP PROCESS
+4. ANGEL ONE API CONFIGURATION
+5. GOOGLE SHEETS SETUP
+6. AI MODEL DEPLOYMENT
+7. N8N WORKFLOW CONFIGURATION
+8. TESTING & VALIDATION
+9. GOING LIVE
+10. MONITORING & MAINTENANCE
+11. TROUBLESHOOTING
+12. SUPPORT & RESOURCES
+
+## ================================================================
+## 1. SYSTEM OVERVIEW
+## ================================================================
+
+This trading bot system consists of:
+- n8n workflows for automation
+- Angel One SmartAPI for trading
+- AI model for trade confirmation
+- Google Sheets for logging
+- Market sentiment analysis
+
+IMPORTANT DISCLAIMER:
+This system is for educational purposes only. Trading involves significant 
+financial risk. Always test thoroughly with paper trading before using 
+real money. Never risk more than you can afford to lose.
+
+## ================================================================
+## 2. PREREQUISITES & REQUIREMENTS
+## ================================================================
+
+### REQUIRED ACCOUNTS:
+□ Angel One trading account with API access
+□ Google Cloud Platform account
+□ GitHub account
+□ Render.com account (free tier)
+□ n8n instance (local or cloud)
+
+### REQUIRED KNOWLEDGE:
+□ Basic understanding of options trading
+□ Familiarity with web interfaces
+□ Ability to follow technical instructions
+
+### SYSTEM REQUIREMENTS:
+□ Stable internet connection
+□ Computer/server for n8n (if running locally)
+□ Modern web browser
+
+## ================================================================
+## 3. STEP-BY-STEP SETUP PROCESS
+## ================================================================
+
+### PHASE 1: ACCOUNT SETUP (Day 1)
+1. Create Angel One trading account
+2. Apply for API access
+3. Setup Google Cloud Platform
+4. Create GitHub repository
+5. Sign up for Render.com
+
+### PHASE 2: API CONFIGURATION (Day 2-3)
+1. Configure Angel One API
+2. Setup Google Sheets API
+3. Deploy AI model on Render
+4. Test all API connections
+
+### PHASE 3: N8N SETUP (Day 4-5)
+1. Install/setup n8n
+2. Import workflows
+3. Configure environment variables
+4. Test workflow components
+
+### PHASE 4: TESTING (Day 6-35)
+1. Enable paper trading mode
+2. Run comprehensive tests
+3. Monitor performance
+4. Optimize parameters
+
+### PHASE 5: GO LIVE (Day 36+)
+1. Final validation
+2. Switch to live trading
+3. Monitor continuously
+
+## ================================================================
+## 4. ANGEL ONE API CONFIGURATION
+## ================================================================
+
+### STEP 4.1: CREATE ANGEL ONE ACCOUNT
+1. Visit https://angelone.in
+2. Click "Open Demat Account"
+3. Complete the registration process:
+   - Provide personal details
+   - Upload required documents (PAN, Aadhaar, Bank details)
+   - Complete video KYC
+4. Wait for account activation (1-2 business days)
+5. Fund your account with minimum required amount
+
+### STEP 4.2: ENABLE API ACCESS
+1. Log in to your Angel One account
+2. Go to "My Profile" → "API"
+3. Click "Apply for API Access"
+4. Fill in the application form:
+   - Purpose: Algorithmic Trading
+   - Expected volume: As per your requirement
+   - Technical contact details
+5. Submit the application
+6. Wait for approval (1-2 business days)
+
+### STEP 4.3: GET API CREDENTIALS
+1. After approval, visit https://smartapi.angelone.in
+2. Log in with your Angel One credentials
+3. Go to "My API" section
+4. Click "Create New API"
+5. Fill in application details:
+   - App Name: Trading Bot
+   - Description: Automated intraday options trading
+   - Redirect URL: http://localhost:3000
+6. Submit and note down your API Key
+7. Save these credentials securely:
+   - API Key
+   - Client ID (your Angel One client ID)
+   - Password (your Angel One password)
+
+### STEP 4.4: SETUP TOTP AUTHENTICATION
+1. Download Google Authenticator or Authy app
+2. In Angel One account, go to "Security" → "Two-Factor Authentication"
+3. Scan the QR code with your authenticator app
+4. Enter the 6-digit code to verify
+5. Save the backup codes securely
+6. Test TOTP generation
+
+### STEP 4.5: TEST API CONNECTION
+Open terminal/command prompt and run:
+
+curl -X POST https://apiconnect.angelbroking.com/rest/auth/angelbroking/user/v1/loginByPassword \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json" \
+  -H "X-UserType: USER" \
+  -H "X-SourceID: WEB" \
+  -H "X-ClientLocalIP: 192.168.1.1" \
+  -H "X-ClientPublicIP: YOUR_PUBLIC_IP" \
+  -H "X-MACAddress: YOUR_MAC_ADDRESS" \
+  -H "X-PrivateKey: YOUR_API_KEY" \
+  -d '{
+    "clientcode": "YOUR_CLIENT_ID",
+    "password": "YOUR_PASSWORD",
+    "totp": "CURRENT_TOTP_CODE"
+  }'
+
+If successful, you'll receive a JWT token.
+
+## ================================================================
+## 5. GOOGLE SHEETS SETUP
+## ================================================================
+
+### STEP 5.1: CREATE GOOGLE CLOUD PROJECT
+1. Visit https://console.cloud.google.com
+2. Sign in with your Google account
+3. Click "Select a project" → "New Project"
+4. Enter project details:
+   - Project Name: Trading Bot Logs
+   - Location: Keep default
+5. Click "Create"
+
+### STEP 5.2: ENABLE REQUIRED APIS
+1. Go to "APIs & Services" → "Library"
+2. Search and enable:
+   - Google Sheets API
+   - Google Drive API
+3. Click "Enable" for both
+
+### STEP 5.3: CREATE SERVICE ACCOUNT
+1. Go to "APIs & Services" → "Credentials"
+2. Click "Create Credentials" → "Service Account"
+3. Enter details:
+   - Service Account Name: trading-bot-logger
+   - Description: Service account for logging trades
+4. Click "Create and Continue"
+5. Skip role assignment (click "Continue")
+6. Click "Done"
+
+### STEP 5.4: GENERATE SERVICE ACCOUNT KEY
+1. Click on the created service account
+2. Go to "Keys" tab
+3. Click "Add Key" → "Create New Key"
+4. Choose "JSON" format
+5. Download the key file
+6. Keep this file secure and note the client_email
+
+### STEP 5.5: CREATE GOOGLE SHEETS
+1. Visit https://sheets.google.com
+2. Create a new spreadsheet
+3. Name it: "Trading Bot Logs"
+4. Create the following sheets with headers:
+
+SHEET 1: "Signals"
+A1: Timestamp
+B1: Signal
+C1: Confidence
+D1: RSI
+E1: MACD
+F1: VIX
+G1: Sentiment
+H1: Writers Zone
+I1: Spot Price
+J1: Strike Price
+K1: Option Type
+L1: Expiry Date
+
+SHEET 2: "Trades"
+A1: Entry Order ID
+B1: Timestamp
+C1: Symbol
+D1: Entry Price
+E1: Stop Loss
+F1: Target
+G1: Quantity
+H1: Status
+I1: Signal
+J1: Confidence
+K1: Exit Price
+L1: PnL
+M1: Exit Type
+N1: Exit Timestamp
+O1: Duration (Minutes)
+P1: ROI (%)
+
+SHEET 3: "Active_Exit_Orders"
+A1: Entry Order ID
+B1: SL Order ID
+C1: Target Order ID
+D1: Symbol
+E1: Entry Price
+F1: SL Price
+G1: Target Price
+H1: Quantity
+I1: Timestamp
+J1: Status
+K1: Exit Type
+L1: Exit Price
+M1: PnL
+N1: Exit Timestamp
+
+SHEET 4: "Daily_Summary"
+A1: Date
+B1: Total Trades
+C1: Winning Trades
+D1: Losing Trades
+E1: Win Rate (%)
+F1: Total PnL
+G1: Max Profit
+H1: Max Loss
+I1: Average Trade Duration
+J1: ROI (%)
+
+SHEET 5: "System_Logs"
+A1: Timestamp
+B1: Event Type
+C1: Message
+D1: Order ID
+E1: Symbol
+F1: Status
+G1: Error Details
+
+### STEP 5.6: SHARE SHEET WITH SERVICE ACCOUNT
+1. In your Google Sheet, click "Share"
+2. Paste the service account email (from JSON file)
+3. Set permission to "Editor"
+4. Uncheck "Notify people"
+5. Click "Share"
+
+### STEP 5.7: GET SHEET ID
+1. Look at your sheet URL
+2. Extract the SHEET_ID from:
+   https://docs.google.com/spreadsheets/d/SHEET_ID/edit
+3. Save this ID for later use
+
+## ================================================================
+## 6. AI MODEL DEPLOYMENT
+## ================================================================
+
+### STEP 6.1: PREPARE FILES
+Create a new folder and add these files:
+- ai_model_api.py (from the provided files)
+- requirements.txt (from the provided files)
+- Procfile (from the provided files)
+
+### STEP 6.2: CREATE GITHUB REPOSITORY
+1. Visit https://github.com
+2. Click "New repository"
+3. Name: trading-ai-model
+4. Make it public or private
+5. Upload the three files above
+6. Commit the changes
+
+### STEP 6.3: DEPLOY ON RENDER
+1. Visit https://render.com
+2. Sign up for a free account
+3. Click "New +" → "Web Service"
+4. Connect your GitHub account
+5. Select your trading-ai-model repository
+6. Configure settings:
+   - Name: trading-ai-model
+   - Region: Choose closest to your location
+   - Branch: main
+   - Runtime: Python 3
+   - Build Command: pip install -r requirements.txt
+   - Start Command: gunicorn ai_model_api:app
+7. Click "Create Web Service"
+8. Wait for deployment to complete
+9. Note the provided URL (e.g., https://trading-ai-model.onrender.com)
+
+### STEP 6.4: TEST AI MODEL
+Test the deployed model:
+
+curl https://your-app-url.onrender.com/health
+
+curl -X POST https://your-app-url.onrender.com/predict \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rsi": 45,
+    "macd": 0.5,
+    "momentum": 2.1,
+    "volumeRatio": 1.2,
+    "vix": 16,
+    "sentiment": "BULLISH",
+    "writersZone": "NEUTRAL",
+    "candlePattern": "NORMAL"
+  }'
+
+### STEP 6.5: DEPLOY SENTIMENT API (OPTIONAL)
+1. Create another repository for market_sentiment_api.py
+2. Deploy on Render following same steps
+3. Note the sentiment API URL
+
+## ================================================================
+## 7. N8N WORKFLOW CONFIGURATION
+## ================================================================
+
+### STEP 7.1: INSTALL N8N
+Choose one option:
+
+OPTION A: Local Installation
+1. Install Node.js (version 16 or higher)
+2. Run: npm install n8n -g
+3. Start n8n: n8n start
+4. Access at http://localhost:5678
+
+OPTION B: Cloud Installation
+1. Use n8n.cloud (paid service)
+2. Or deploy on your preferred cloud platform
+
+### STEP 7.2: SETUP N8N CREDENTIALS
+1. In n8n, go to "Settings" → "Credentials"
+2. Add Google Sheets API credentials:
+   - Authentication: Service Account
+   - Service Account Email: From your JSON file
+   - Private Key: From your JSON file
+3. Test the connection
+
+### STEP 7.3: CONFIGURE ENVIRONMENT VARIABLES
+In n8n settings or environment, add:
+
+# Angel One API
+ANGEL_API_KEY=your_api_key_here
+ANGEL_CLIENT_ID=your_client_id_here
+ANGEL_PASSWORD=your_password_here
+ANGEL_TOTP=123456  # This will be updated dynamically
+
+# AI Model
+AI_MODEL_URL=https://your-model.onrender.com
+AI_API_KEY=your_api_key_if_needed
+
+# Google Sheets
+GOOGLE_SHEET_ID=your_sheet_id_here
+
+# Market Sentiment (Optional)
+SENTIMENT_API_URL=https://your-sentiment-api.onrender.com
+NEWS_API_KEY=your_news_api_key
+TWITTER_BEARER_TOKEN=your_twitter_token
+
+# Trading Configuration
+PAPER_TRADING_MODE=true  # Start with paper trading
+LOT_SIZE=25  # BANKNIFTY lot size
+MAX_DAILY_LOSS=5000
+VIX_THRESHOLD=18
+CONFIDENCE_THRESHOLD=0.75
+
+### STEP 7.4: IMPORT WORKFLOWS
+1. In n8n, go to "Workflows"
+2. Click "Import from File"
+3. Import n8n_workflow_final.json
+4. Import exit_order_monitor.json
+5. Save both workflows
+
+### STEP 7.5: CONFIGURE WORKFLOW NODES
+For each workflow:
+1. Check all HTTP Request nodes have correct URLs
+2. Verify Google Sheets nodes point to correct sheet
+3. Update any hardcoded values with environment variables
+4. Test individual nodes
+
+### STEP 7.6: SETUP TOTP HANDLING
+Since TOTP changes every 30 seconds, you have options:
+
+OPTION A: Manual Update (Recommended for testing)
+- Update ANGEL_TOTP environment variable every 30 seconds
+- Use this for initial testing
+
+OPTION B: Automated TOTP (Advanced)
+- Implement TOTP generation in a separate node
+- Requires storing TOTP secret securely
+
+## ================================================================
+## 8. TESTING & VALIDATION
+## ================================================================
+
+### STEP 8.1: ENABLE PAPER TRADING MODE
+1. Set PAPER_TRADING_MODE=true in environment variables
+2. This will simulate trades without real money
+3. All logging will still work normally
+
+### STEP 8.2: TEST INDIVIDUAL COMPONENTS
+Test each component separately:
+
+1. Angel One API Login:
+   - Run just the login node
+   - Verify JWT token is received
+
+2. Market Data Fetching:
+   - Test spot price, candles, VIX nodes
+   - Verify data is received correctly
+
+3. Technical Indicators:
+   - Check RSI, MACD calculations
+   - Verify values are reasonable
+
+4. AI Model:
+   - Test with sample data
+   - Verify predictions are received
+
+5. Google Sheets:
+   - Test logging to each sheet
+   - Verify data appears correctly
+
+### STEP 8.3: RUN FULL WORKFLOW TEST
+1. Enable the main workflow
+2. Monitor execution logs
+3. Check Google Sheets for data
+4. Verify paper trades are logged
+
+### STEP 8.4: MONITOR FOR 30 DAYS
+Run in paper trading mode for minimum 30 days:
+- Monitor daily performance
+- Check win rate (target: >60%)
+- Verify risk management works
+- Ensure no critical errors
+
+### STEP 8.5: PERFORMANCE VALIDATION
+Before going live, ensure:
+□ Win rate > 60%
+□ Maximum drawdown < 10%
+□ System runs without errors
+□ All edge cases handled
+□ Risk management working
+□ Logging complete and accurate
+
+## ================================================================
+## 9. GOING LIVE
+## ================================================================
+
+### STEP 9.1: FINAL PREPARATIONS
+□ Paper trading successful for 30+ days
+□ All systems tested and working
+□ Risk parameters configured
+□ Emergency procedures documented
+□ Monitoring systems in place
+
+### STEP 9.2: SWITCH TO LIVE TRADING
+1. Set PAPER_TRADING_MODE=false
+2. Verify Angel One account has sufficient funds
+3. Start with minimum position size
+4. Monitor continuously for first few days
+
+### STEP 9.3: LIVE TRADING CHECKLIST
+□ Sufficient margin in Angel One account
+□ All API credentials valid and working
+□ Risk limits properly configured
+□ Stop loss and target orders working
+□ Real-time monitoring active
+□ Emergency stop procedures ready
+
+### STEP 9.4: GRADUAL SCALING
+1. Start with 1 lot size
+2. Monitor for 1 week
+3. Gradually increase if performance is good
+4. Never exceed your risk tolerance
+
+## ================================================================
+## 10. MONITORING & MAINTENANCE
+## ================================================================
+
+### DAILY TASKS:
+□ Check system logs for errors
+□ Verify TOTP authentication working
+□ Review trade executions
+□ Monitor P&L performance
+□ Validate data accuracy in sheets
+
+### WEEKLY TASKS:
+□ Update TOTP secrets if needed
+□ Review system performance metrics
+□ Analyze trading results
+□ Check API rate limits
+□ Backup configuration files
+
+### MONTHLY TASKS:
+□ Rotate API keys for security
+□ Review and optimize trading parameters
+□ Retrain AI model with new data
+□ Update documentation
+□ Comprehensive system review
+
+### MONITORING DASHBOARDS:
+Create monitoring for:
+- Active positions and P&L
+- Daily/weekly performance
+- System health and uptime
+- API response times
+- Error rates and alerts
+
+## ================================================================
+## 11. TROUBLESHOOTING
+## ================================================================
+
+### COMMON ISSUES AND SOLUTIONS:
+
+ISSUE: TOTP Authentication Fails
+SOLUTION:
+- Check system time is synchronized
+- Update TOTP code with current value
+- Verify authenticator app is working
+- Check API key is correct
+
+ISSUE: AI Model Not Responding
+SOLUTION:
+- Check Render.com deployment status
+- Verify AI_MODEL_URL is correct
+- Check model logs for errors
+- Restart the service if needed
+
+ISSUE: Orders Not Executing
+SOLUTION:
+- Verify Angel One API credentials
+- Check available margin and funds
+- Validate symbol format and expiry
+- Check order parameters
+
+ISSUE: Google Sheets Not Updating
+SOLUTION:
+- Check service account permissions
+- Verify GOOGLE_SHEET_ID is correct
+- Test Google Sheets API connection
+- Check for API quota limits
+
+ISSUE: Workflow Stops Running
+SOLUTION:
+- Check n8n logs for errors
+- Verify all environment variables
+- Test individual nodes
+- Restart n8n if needed
+
+ISSUE: High Error Rates
+SOLUTION:
+- Check API rate limits
+- Add delays between requests
+- Implement retry mechanisms
+- Monitor system resources
+
+### ERROR HANDLING PROCEDURES:
+1. Identify the error source
+2. Check relevant logs
+3. Apply appropriate solution
+4. Test the fix
+5. Monitor for recurrence
+6. Document the resolution
+
+### EMERGENCY PROCEDURES:
+If critical issues occur:
+1. Stop all workflows immediately
+2. Cancel any open orders manually
+3. Check account positions
+4. Identify and fix the issue
+5. Test thoroughly before restarting
+6. Document the incident
+
+## ================================================================
+## 12. SUPPORT & RESOURCES
+## ================================================================
+
+### DOCUMENTATION LINKS:
+- Angel One API: https://smartapi.angelone.in/docs
+- n8n Documentation: https://docs.n8n.io
+- Google Sheets API: https://developers.google.com/sheets
+- Render.com: https://render.com/docs
+
+### SUPPORT CONTACTS:
+- Angel One API Support: smartapisupport@angelbroking.com
+- n8n Community: https://community.n8n.io
+- Google Cloud Support: Through Google Cloud Console
+
+### COMMUNITY RESOURCES:
+- Trading automation forums
+- n8n user communities
+- Angel One developer groups
+- GitHub repositories and examples
+
+### BACKUP AND RECOVERY:
+- Regular backup of n8n workflows
+- Export Google Sheets data weekly
+- Keep copies of all configuration files
+- Document all custom modifications
+
+## ================================================================
+## FINAL CHECKLIST
+## ================================================================
+
+### SETUP COMPLETION CHECKLIST:
+□ Angel One account created and API enabled
+□ Google Cloud project setup with Sheets API
+□ AI model deployed on Render.com
+□ n8n installed and configured
+□ All workflows imported and tested
+□ Environment variables configured
+□ Paper trading mode enabled and tested
+□ All APIs tested and working
+□ Google Sheets logging functional
+□ Risk management parameters set
+□ Monitoring systems in place
+□ Documentation reviewed and understood
+□ Emergency procedures documented
+□ 30+ days of successful paper trading
+□ Performance validation completed
+□ Ready for live trading
+
+### IMPORTANT REMINDERS:
+- Always start with paper trading
+- Never risk more than you can afford to lose
+- Monitor the system continuously
+- Keep all credentials secure
+- Regular backups and maintenance
+- Stay updated with API changes
+- Follow all regulatory requirements
+
+## ================================================================
+## CONCLUSION
+## ================================================================
+
+This comprehensive guide provides everything needed to setup and run 
+the complete no-code intraday options trading bot. Follow each step 
+carefully, test thoroughly, and always prioritize risk management.
+
+Remember: Trading involves significant risk. This system is for 
+educational purposes. Always test extensively before using real money.
+
+Good luck and trade responsibly!
+
+## ================================================================
+## END OF SETUP GUIDE
+## ================================================================
+
+
+
+# QUICK START CHECKLIST - TRADING BOT SETUP
+# ==========================================
+
+## PRE-SETUP REQUIREMENTS
+□ Angel One trading account
+□ Google account
+□ GitHub account  
+□ Render.com account
+□ Basic trading knowledge
+
+## DAY 1: ACCOUNT SETUP
+□ Create Angel One account
+□ Apply for API access
+□ Setup Google Cloud Platform
+□ Create GitHub repository
+□ Sign up for Render.com
+
+## DAY 2-3: API CONFIGURATION
+□ Get Angel One API credentials
+□ Setup TOTP authentication
+□ Create Google Sheets with required structure
+□ Setup Google Sheets API service account
+□ Deploy AI model on Render.com
+□ Test all API connections
+
+## DAY 4-5: N8N SETUP
+□ Install n8n (local or cloud)
+□ Import both workflows
+□ Configure environment variables
+□ Setup Google Sheets credentials
+□ Test individual workflow nodes
+
+## DAY 6-35: TESTING PHASE
+□ Enable paper trading mode (PAPER_TRADING_MODE=true)
+□ Run workflows daily
+□ Monitor Google Sheets logging
+□ Check performance metrics
+□ Validate risk management
+□ Ensure win rate > 60%
+
+## DAY 36+: GO LIVE
+□ Final validation complete
+□ Switch to live mode (PAPER_TRADING_MODE=false)
+□ Start with minimum position size
+□ Monitor continuously
+□ Scale gradually
+
+## CRITICAL ENVIRONMENT VARIABLES
+ANGEL_API_KEY=your_api_key
+ANGEL_CLIENT_ID=your_client_id  
+ANGEL_PASSWORD=your_password
+ANGEL_TOTP=current_totp_code
+AI_MODEL_URL=https://your-model.onrender.com
+GOOGLE_SHEET_ID=your_sheet_id
+PAPER_TRADING_MODE=true
+
+## DAILY MONITORING
+□ Check system logs
+□ Verify TOTP working
+□ Review trade executions
+□ Monitor P&L
+□ Validate data accuracy
+
+## EMERGENCY CONTACTS
+Angel One API: smartapisupport@angelbroking.com
+n8n Community: https://community.n8n.io
+
+## REMEMBER
+- Always start with paper trading
+- Never risk more than you can afford to lose
+- Test thoroughly before going live
+- Monitor continuously
+- Keep credentials secure
+
+
+# ENVIRONMENT VARIABLES TEMPLATE
+# ==============================
+# Copy this template and fill in your actual values
+
+# ANGEL ONE API CONFIGURATION
+# ============================
+ANGEL_API_KEY=your_angel_one_api_key_here
+ANGEL_CLIENT_ID=your_angel_one_client_id_here
+ANGEL_PASSWORD=your_angel_one_password_here
+ANGEL_TOTP=123456  # Update this with current TOTP code
+
+# AI MODEL CONFIGURATION
+# ======================
+AI_MODEL_URL=https://your-ai-model.onrender.com
+AI_API_KEY=your_ai_api_key_if_needed
+
+# GOOGLE SHEETS CONFIGURATION
+# ============================
+GOOGLE_SHEET_ID=your_google_sheet_id_here
+GOOGLE_SERVICE_ACCOUNT_EMAIL=your-service-account@project.iam.gserviceaccount.com
+
+# MARKET SENTIMENT API (OPTIONAL)
+# ================================
+SENTIMENT_API_URL=https://your-sentiment-api.onrender.com
+NEWS_API_KEY=your_news_api_key_here
+TWITTER_BEARER_TOKEN=your_twitter_bearer_token_here
+
+# TRADING CONFIGURATION
+# ======================
+PAPER_TRADING_MODE=true  # Set to false for live trading
+LOT_SIZE=25  # BANKNIFTY=25, NIFTY=50
+MAX_DAILY_LOSS=5000
+VIX_THRESHOLD=18
+CONFIDENCE_THRESHOLD=0.75
+STOP_LOSS_POINTS=15
+TARGET_POINTS=30
+
+# SYSTEM CONFIGURATION
+# ====================
+LOG_LEVEL=INFO
+MAX_RETRIES=3
+API_TIMEOUT=30
+RATE_LIMIT_DELAY=1000
+
+# RISK MANAGEMENT
+# ===============
+MAX_POSITIONS=3
+MAX_DAILY_TRADES=10
+EMERGENCY_STOP=false
+
+# NOTIFICATION SETTINGS
+# =====================
+ENABLE_ALERTS=true
+ALERT_EMAIL=your_email@example.com
+
+# BACKUP SETTINGS
+# ===============
+BACKUP_ENABLED=true
+BACKUP_FREQUENCY=daily
+
+# NOTES:
+# ======
+# 1. Replace all placeholder values with your actual credentials
+# 2. Keep PAPER_TRADING_MODE=true until you complete 30 days of testing
+# 3. Never share these credentials publicly
+# 4. Update ANGEL_TOTP every 30 seconds when trading
+# 5. Store this file securely and backup regularly
+
+
+# TROUBLESHOOTING GUIDE - TRADING BOT
+# ====================================
+
+## COMMON ISSUES AND SOLUTIONS
+
+### 1. ANGEL ONE API ISSUES
+# ========================
+
+PROBLEM: "Invalid TOTP" error
+SOLUTION:
+- Check system time is synchronized
+- Generate new TOTP code from authenticator app
+- Update ANGEL_TOTP environment variable
+- Ensure TOTP is entered within 30-second window
+
+PROBLEM: "API Key Invalid" error
+SOLUTION:
+- Verify ANGEL_API_KEY is correct
+- Check for extra spaces or characters
+- Regenerate API key from Angel One developer console
+- Ensure API access is approved and active
+
+PROBLEM: "Insufficient funds" error
+SOLUTION:
+- Check available margin in Angel One account
+- Verify account has sufficient balance
+- Check if funds are blocked in other positions
+- Contact Angel One support if needed
+
+PROBLEM: "Order rejected" error
+SOLUTION:
+- Verify symbol format is correct
+- Check expiry date is valid
+- Ensure lot size is correct (BANKNIFTY=25, NIFTY=50)
+- Validate strike price is available
+
+### 2. AI MODEL ISSUES
+# ===================
+
+PROBLEM: AI model not responding
+SOLUTION:
+- Check Render.com deployment status
+- Verify AI_MODEL_URL is correct
+- Check model logs in Render dashboard
+- Restart the service if needed
+- Test with curl command
+
+PROBLEM: "Model prediction error"
+SOLUTION:
+- Check input data format
+- Verify all required fields are present
+- Check model logs for specific errors
+- Redeploy model if necessary
+
+PROBLEM: Low confidence scores
+SOLUTION:
+- Review input data quality
+- Check if market conditions are unusual
+- Consider retraining model with recent data
+- Adjust confidence threshold if needed
+
+### 3. GOOGLE SHEETS ISSUES
+# =========================
+
+PROBLEM: "Permission denied" error
+SOLUTION:
+- Check service account email is added to sheet
+- Verify permission is set to "Editor"
+- Ensure GOOGLE_SHEET_ID is correct
+- Test Google Sheets API connection
+
+PROBLEM: Data not appearing in sheets
+SOLUTION:
+- Check sheet names match exactly
+- Verify column headers are correct
+- Check for API quota limits
+- Test with manual data entry
+
+PROBLEM: "Sheet not found" error
+SOLUTION:
+- Verify GOOGLE_SHEET_ID is correct
+- Check sheet sharing settings
+- Ensure service account has access
+- Create missing sheets if needed
+
+### 4. N8N WORKFLOW ISSUES
+# ========================
+
+PROBLEM: Workflow not triggering
+SOLUTION:
+- Check cron expression is correct
+- Verify workflow is activated
+- Check time zone settings
+- Ensure n8n is running
+
+PROBLEM: Node execution fails
+SOLUTION:
+- Check node configuration
+- Verify environment variables
+- Test individual nodes
+- Check error logs
+
+PROBLEM: "Environment variable not found"
+SOLUTION:
+- Verify all required variables are set
+- Check variable names for typos
+- Restart n8n after adding variables
+- Use n8n environment settings
+
+### 5. TRADING LOGIC ISSUES
+# =========================
+
+PROBLEM: No trades being placed
+SOLUTION:
+- Check VIX threshold (must be < 18)
+- Verify AI confidence threshold (must be ≥ 0.75)
+- Check if signal is not "HOLD"
+- Ensure trading hours (9:15 AM - 3:15 PM)
+
+PROBLEM: Stop loss not working
+SOLUTION:
+- Verify SL order placement
+- Check trigger price calculation
+- Ensure order type is SL-M
+- Monitor order status
+
+PROBLEM: Target not executing
+SOLUTION:
+- Check LIMIT order placement
+- Verify target price calculation
+- Ensure sufficient price movement
+- Monitor market conditions
+
+### 6. PERFORMANCE ISSUES
+# ======================
+
+PROBLEM: High error rates
+SOLUTION:
+- Check API rate limits
+- Add delays between requests
+- Implement retry mechanisms
+- Monitor system resources
+
+PROBLEM: Slow execution
+SOLUTION:
+- Optimize workflow nodes
+- Reduce unnecessary API calls
+- Check internet connection
+- Monitor server performance
+
+PROBLEM: Memory issues
+SOLUTION:
+- Restart n8n regularly
+- Clear old workflow executions
+- Monitor system memory usage
+- Optimize data processing
+
+## DIAGNOSTIC COMMANDS
+# ====================
+
+# Test Angel One API connection:
+curl -X POST https://apiconnect.angelbroking.com/rest/auth/angelbroking/user/v1/loginByPassword \
+  -H "Content-Type: application/json" \
+  -H "X-PrivateKey: YOUR_API_KEY" \
+  -d '{"clientcode": "YOUR_CLIENT_ID", "password": "YOUR_PASSWORD", "totp": "CURRENT_TOTP"}'
+
+# Test AI model:
+curl https://your-ai-model.onrender.com/health
+
+# Test AI prediction:
+curl -X POST https://your-ai-model.onrender.com/predict \
+  -H "Content-Type: application/json" \
+  -d '{"rsi": 45, "macd": 0.5, "vix": 16}'
+
+## ERROR LOG LOCATIONS
+# ====================
+
+N8N Logs: Check n8n interface under "Executions"
+Angel One API: Check response messages in HTTP nodes
+AI Model Logs: Check Render.com dashboard
+Google Sheets: Check API response in n8n logs
+
+## EMERGENCY PROCEDURES
+# =====================
+
+IMMEDIATE ACTIONS:
+1. Stop all n8n workflows
+2. Cancel any open orders in Angel One
+3. Check current positions
+4. Identify the issue
+5. Fix and test before restarting
+
+CRITICAL ISSUE ESCALATION:
+1. Document the error with screenshots
+2. Check all logs for error details
+3. Contact relevant support teams
+4. Implement temporary workarounds
+5. Monitor closely after resolution
+
+## PREVENTION MEASURES
+# ====================
+
+DAILY CHECKS:
+□ Verify all APIs are responding
+□ Check error rates in logs
+□ Monitor system performance
+□ Validate data accuracy
+□ Test TOTP authentication
+
+WEEKLY MAINTENANCE:
+□ Review and clear old logs
+□ Update API credentials if needed
+□ Check for system updates
+□ Backup configurations
+□ Performance optimization
+
+## SUPPORT CONTACTS
+# =================
+
+Angel One API: smartapisupport@angelbroking.com
+n8n Community: https://community.n8n.io
+Google Cloud: Through Google Cloud Console
+Render.com: Through Render dashboard
+
+## MONITORING TOOLS
+# =================
+
+System Health: Check n8n execution history
+API Status: Monitor response times and errors
+Trading Performance: Review Google Sheets data
+Error Tracking: Set up alerts for critical failures
+
+Remember: Always test fixes in paper trading mode before applying to live trading!
+
+# SECURITY CHECKLIST - TRADING BOT
+# =================================
+
+## CRITICAL SECURITY MEASURES
+# ============================
+
+### API CREDENTIALS SECURITY
+□ Store all API keys in environment variables (never in code)
+□ Use strong, unique passwords for all accounts
+□ Enable 2FA/TOTP on all accounts
+□ Regularly rotate API keys (monthly)
+□ Never share credentials publicly
+□ Use secure password manager
+□ Backup credentials securely
+
+### ANGEL ONE API SECURITY
+□ TOTP authentication enabled
+□ API access restricted to specific IPs (if available)
+□ Monitor API usage regularly
+□ Set up account alerts for trades
+□ Use minimum required permissions
+□ Regular password changes
+□ Monitor login activities
+
+### GOOGLE CLOUD SECURITY
+□ Service account with minimal permissions
+□ Private key stored securely
+□ Regular key rotation
+□ Monitor API usage and quotas
+□ Enable audit logging
+□ Restrict sheet access to service account only
+□ Use IAM best practices
+
+### N8N SECURITY
+□ Secure n8n instance (authentication enabled)
+□ Environment variables properly configured
+□ Regular backups of workflows
+□ Monitor execution logs
+□ Restrict access to n8n interface
+□ Use HTTPS for web access
+□ Keep n8n updated
+
+### SYSTEM SECURITY
+□ Secure server/computer running n8n
+□ Regular system updates
+□ Firewall properly configured
+□ Antivirus software installed
+□ Secure network connection
+□ Regular security scans
+□ Monitor system logs
+
+## ACCESS CONTROL
+# ===============
+
+### PRINCIPLE OF LEAST PRIVILEGE
+□ Each service has minimum required permissions
+□ No unnecessary API access
+□ Limited sheet access permissions
+□ Restricted network access where possible
+□ Regular permission audits
+
+### AUTHENTICATION
+□ Strong passwords (12+ characters)
+□ Multi-factor authentication enabled
+□ TOTP for Angel One API
+□ Service account for Google Sheets
+□ Secure session management
+
+## DATA PROTECTION
+# ================
+
+### SENSITIVE DATA HANDLING
+□ No credentials in logs
+□ Encrypted data transmission
+□ Secure data storage
+□ Regular data backups
+□ Secure backup storage
+□ Data retention policies
+□ Secure data disposal
+
+### LOGGING SECURITY
+□ No sensitive data in logs
+□ Secure log storage
+□ Regular log rotation
+□ Access controls on logs
+□ Monitor for suspicious activities
+□ Audit trail maintenance
+
+## NETWORK SECURITY
+# =================
+
+### SECURE COMMUNICATIONS
+□ HTTPS for all API calls
+□ TLS encryption enabled
+□ Secure DNS settings
+□ VPN usage where appropriate
+□ Monitor network traffic
+□ Firewall rules configured
+
+### API SECURITY
+□ Rate limiting implemented
+□ Input validation
+□ Error handling (no sensitive data exposure)
+□ Timeout configurations
+□ Retry mechanisms with backoff
+□ Monitor API abuse
+
+## INCIDENT RESPONSE
+# ==================
+
+### PREPARATION
+□ Incident response plan documented
+□ Emergency contacts identified
+□ Backup procedures tested
+□ Recovery procedures documented
+□ Security team contacts available
+
+### DETECTION
+□ Monitor for unusual activities
+□ Set up security alerts
+□ Regular security audits
+□ Log analysis procedures
+□ Automated monitoring tools
+
+### RESPONSE
+□ Immediate containment procedures
+□ Evidence preservation
+□ Stakeholder notification
+□ Recovery procedures
+□ Post-incident analysis
+
+## COMPLIANCE
+# ===========
+
+### REGULATORY COMPLIANCE
+□ Follow local trading regulations
+□ Maintain proper audit trails
+□ Data protection compliance (GDPR, etc.)
+□ Financial regulations compliance
+□ Regular compliance reviews
+
+### DOCUMENTATION
+□ Security policies documented
+□ Procedures clearly defined
+□ Regular policy updates
+□ Staff training materials
+□ Compliance checklists
+
+## MONITORING AND AUDITING
+# ========================
+
+### CONTINUOUS MONITORING
+□ Real-time security monitoring
+□ Automated alert systems
+□ Regular security scans
+□ Performance monitoring
+□ Anomaly detection
+
+### REGULAR AUDITS
+□ Monthly security reviews
+□ Quarterly penetration testing
+□ Annual security assessments
+□ Third-party security audits
+□ Compliance audits
+
+## BACKUP AND RECOVERY
+# ====================
+
+### BACKUP PROCEDURES
+□ Regular automated backups
+□ Multiple backup locations
+□ Encrypted backup storage
+□ Backup integrity testing
+□ Recovery procedure testing
+
+### DISASTER RECOVERY
+□ Disaster recovery plan
+□ Recovery time objectives defined
+□ Recovery point objectives defined
+□ Regular DR testing
+□ Alternative system access
+
+## SECURITY TOOLS
+# ===============
+
+### RECOMMENDED TOOLS
+□ Password manager (1Password, Bitwarden)
+□ 2FA app (Google Authenticator, Authy)
+□ VPN service (if needed)
+□ Antivirus software
+□ System monitoring tools
+□ Log analysis tools
+
+### SECURITY SCANNING
+□ Regular vulnerability scans
+□ Dependency security checks
+□ Code security analysis
+□ Network security scans
+□ Configuration reviews
+
+## TRAINING AND AWARENESS
+# =======================
+
+### SECURITY TRAINING
+□ Regular security awareness training
+□ Phishing awareness
+□ Social engineering awareness
+□ Incident response training
+□ Best practices documentation
+
+### STAYING UPDATED
+□ Security news monitoring
+□ Vulnerability alerts
+□ Software update notifications
+□ Security community participation
+□ Regular security education
+
+## EMERGENCY PROCEDURES
+# =====================
+
+### SECURITY INCIDENT
+1. Immediately stop all trading activities
+2. Disconnect from networks if necessary
+3. Preserve evidence
+4. Contact security team
+5. Follow incident response plan
+6. Document all actions taken
+
+### CREDENTIAL COMPROMISE
+1. Immediately change all passwords
+2. Revoke compromised API keys
+3. Generate new credentials
+4. Review all recent activities
+5. Monitor for unauthorized access
+6. Update security measures
+
+### SYSTEM COMPROMISE
+1. Isolate affected systems
+2. Preserve forensic evidence
+3. Assess damage and scope
+4. Implement containment measures
+5. Begin recovery procedures
+6. Conduct post-incident review
+
+## SECURITY CHECKLIST SUMMARY
+# ============================
+
+DAILY:
+□ Monitor system logs for anomalies
+□ Check for security alerts
+□ Verify TOTP is working
+□ Review trading activities
+
+WEEKLY:
+□ Review access logs
+□ Check for software updates
+□ Monitor API usage
+□ Backup verification
+
+MONTHLY:
+□ Rotate API keys
+□ Security audit review
+□ Update passwords
+□ Review permissions
+
+QUARTERLY:
+□ Comprehensive security review
+□ Penetration testing
+□ Disaster recovery testing
+□ Security training updates
+
+REMEMBER: Security is an ongoing process, not a one-time setup. 
+Stay vigilant and keep all systems updated and monitored!

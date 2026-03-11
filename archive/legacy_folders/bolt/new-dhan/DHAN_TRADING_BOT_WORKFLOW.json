@@ -1,0 +1,871 @@
+{
+  "name": "Complete Intraday Options Trading Bot - Dhan API Migration",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/5 9-15 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Trading Hours Cron",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [180, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "dateTime": [
+            {
+              "value1": "{{new Date().getHours()}}",
+              "operation": "between",
+              "value2": 9,
+              "value3": 15
+            }
+          ]
+        }
+      },
+      "id": "time-filter",
+      "name": "Trading Hours Filter",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.dhan.co/login",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        "body": {
+          "userId": "{{$env.DHAN_CLIENT_ID}}",
+          "password": "{{$env.DHAN_PASSWORD}}",
+          "twoFA": "{{$env.DHAN_2FA}}",
+          "appName": "WEB"
+        }
+      },
+      "id": "dhan-login",
+      "name": "Dhan Authentication",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [620, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.dhan.co/v2/charts/intraday",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "access-token": "{{$node['Dhan Authentication'].json.data.access_token}}"
+        },
+        "qs": {
+          "securityId": "13",
+          "exchangeSegment": "NSE_EQ",
+          "instrument": "INDEX"
+        }
+      },
+      "id": "get-banknifty-data",
+      "name": "Get Bank Nifty OHLC Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [840, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.dhan.co/v2/marketfeed/ltp",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "access-token": "{{$node['Dhan Authentication'].json.data.access_token}}"
+        },
+        "qs": {
+          "securityId": "13",
+          "exchangeSegment": "NSE_EQ",
+          "instrument": "INDEX"
+        }
+      },
+      "id": "get-spot-price",
+      "name": "Get Bank Nifty LTP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1060, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.dhan.co/v2/marketfeed/ltp",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "access-token": "{{$node['Dhan Authentication'].json.data.access_token}}"
+        },
+        "qs": {
+          "securityId": "27",
+          "exchangeSegment": "NSE_EQ",
+          "instrument": "INDEX"
+        }
+      },
+      "id": "get-vix-data",
+      "name": "Get India VIX Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1280, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "{{$node['Get India VIX Data'].json.data.LTP}}",
+              "operation": "smaller",
+              "value2": 18
+            }
+          ]
+        }
+      },
+      "id": "vix-filter",
+      "name": "VIX Filter (< 18)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "{{$env.SENTIMENT_API_URL}}/market-sentiment",
+        "headers": {
+          "Authorization": "Bearer {{$env.SENTIMENT_API_KEY}}"
+        }
+      },
+      "id": "market-sentiment",
+      "name": "Market Sentiment API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1720, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://images.dhan.co/api-data/api-scrip-master.csv",
+        "headers": {
+          "Accept": "text/csv"
+        }
+      },
+      "id": "get-instrument-master",
+      "name": "Get Dhan Instrument Master",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1940, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enhanced Option Chain Builder using Dhan Instrument Master\nconst csvData = $node['Get Dhan Instrument Master'].json;\nconst spotPrice = parseFloat($node['Get Bank Nifty LTP'].json.data.LTP);\nconst accessToken = $node['Dhan Authentication'].json.data.access_token;\n\n// Parse CSV data to extract BANKNIFTY options\nconst lines = csvData.split('\\n');\nconst headers = lines[0].split(',');\n\n// Find relevant column indices\nconst securityIdIndex = headers.indexOf('SEM_SECURITY_ID');\nconst tradingSymbolIndex = headers.indexOf('SEM_TRADING_SYMBOL');\nconst instrumentIndex = headers.indexOf('SEM_INSTRUMENT_NAME');\nconst strikeIndex = headers.indexOf('SEM_STRIKE_PRICE');\nconst expiryIndex = headers.indexOf('SEM_EXPIRY_DATE');\nconst lotSizeIndex = headers.indexOf('SEM_LOT_SIZE');\n\n// Get current Thursday expiry\nconst today = new Date();\nconst nextThursday = new Date(today);\nconst daysUntilThursday = (4 - today.getDay() + 7) % 7;\n\nif (daysUntilThursday === 0 && today.getHours() >= 15) {\n  nextThursday.setDate(today.getDate() + 7);\n} else {\n  nextThursday.setDate(today.getDate() + daysUntilThursday);\n}\n\nconst expiryDateStr = nextThursday.toISOString().split('T')[0];\n\n// Filter BANKNIFTY options for current expiry\nconst bankNiftyOptions = [];\nconst atmStrike = Math.round(spotPrice / 100) * 100;\n\nfor (let i = 1; i < lines.length; i++) {\n  const row = lines[i].split(',');\n  \n  if (row.length < headers.length) continue;\n  \n  const instrument = row[instrumentIndex];\n  const tradingSymbol = row[tradingSymbolIndex];\n  const strike = parseFloat(row[strikeIndex]);\n  const expiry = row[expiryIndex];\n  const securityId = row[securityIdIndex];\n  const lotSize = parseInt(row[lotSizeIndex]);\n  \n  // Filter for BANKNIFTY options with current expiry\n  if (instrument === 'OPTIDX' && \n      tradingSymbol.startsWith('BANKNIFTY') && \n      expiry === expiryDateStr &&\n      strike >= atmStrike - 500 && \n      strike <= atmStrike + 500) {\n    \n    const optionType = tradingSymbol.includes('CE') ? 'CE' : 'PE';\n    \n    bankNiftyOptions.push({\n      securityId: securityId,\n      tradingSymbol: tradingSymbol,\n      strike: strike,\n      optionType: optionType,\n      expiry: expiry,\n      lotSize: lotSize,\n      distanceFromATM: Math.abs(strike - atmStrike)\n    });\n  }\n}\n\n// Sort by distance from ATM\nbankNiftyOptions.sort((a, b) => a.distanceFromATM - b.distanceFromATM);\n\n// Separate CE and PE options\nconst ceOptions = bankNiftyOptions.filter(opt => opt.optionType === 'CE').slice(0, 10);\nconst peOptions = bankNiftyOptions.filter(opt => opt.optionType === 'PE').slice(0, 10);\n\n// Get LTP for top options\nasync function getOptionLTP(securityId) {\n  try {\n    const response = await fetch(`https://api.dhan.co/v2/marketfeed/ltp?securityId=${securityId}&exchangeSegment=NSE_FNO&instrument=OPTIDX`, {\n      headers: {\n        'access-token': accessToken,\n        'Content-Type': 'application/json'\n      }\n    });\n    \n    if (response.ok) {\n      const data = await response.json();\n      return data.data.LTP || 0;\n    }\n  } catch (error) {\n    console.error(`Error fetching LTP for ${securityId}:`, error);\n  }\n  return 0;\n}\n\n// Fetch LTP for CE options\nconst ceOptionsWithLTP = [];\nfor (const option of ceOptions) {\n  const ltp = await getOptionLTP(option.securityId);\n  ceOptionsWithLTP.push({\n    ...option,\n    ltp: ltp,\n    volume: 0, // Will be fetched separately if needed\n    openInterest: 0 // Will be fetched separately if needed\n  });\n}\n\n// Fetch LTP for PE options\nconst peOptionsWithLTP = [];\nfor (const option of peOptions) {\n  const ltp = await getOptionLTP(option.securityId);\n  peOptionsWithLTP.push({\n    ...option,\n    ltp: ltp,\n    volume: 0,\n    openInterest: 0\n  });\n}\n\nreturn {\n  spotPrice: spotPrice,\n  atmStrike: atmStrike,\n  expiry: expiryDateStr,\n  ceOptions: ceOptionsWithLTP,\n  peOptions: peOptionsWithLTP,\n  totalOptionsFound: bankNiftyOptions.length,\n  timestamp: new Date().toISOString()\n};"
+      },
+      "id": "build-option-chain",
+      "name": "Build Option Chain from Master",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2160, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enhanced Technical Indicators with Dhan Data Integration\nconst ohlcData = $node['Get Bank Nifty OHLC Data'].json.data || [];\nconst currentPrice = parseFloat($node['Get Bank Nifty LTP'].json.data.LTP);\nconst vix = parseFloat($node['Get India VIX Data'].json.data.LTP);\n\n// RSI Calculation (14 period)\nfunction calculateRSI(prices, period = 14) {\n  if (prices.length < period + 1) return 50;\n  \n  const gains = [];\n  const losses = [];\n  \n  for (let i = 1; i < prices.length; i++) {\n    const change = prices[i] - prices[i-1];\n    gains.push(change > 0 ? change : 0);\n    losses.push(change < 0 ? Math.abs(change) : 0);\n  }\n  \n  const avgGain = gains.slice(-period).reduce((a, b) => a + b, 0) / period;\n  const avgLoss = losses.slice(-period).reduce((a, b) => a + b, 0) / period;\n  \n  if (avgLoss === 0) return 100;\n  const rs = avgGain / avgLoss;\n  return 100 - (100 / (1 + rs));\n}\n\n// MACD Calculation\nfunction calculateEMA(prices, period) {\n  if (prices.length === 0) return 0;\n  const k = 2 / (period + 1);\n  let ema = prices[0];\n  for (let i = 1; i < prices.length; i++) {\n    ema = prices[i] * k + ema * (1 - k);\n  }\n  return ema;\n}\n\nfunction calculateMACD(prices) {\n  if (prices.length < 26) return { macd: 0, signal: 0, histogram: 0 };\n  \n  const ema12 = calculateEMA(prices, 12);\n  const ema26 = calculateEMA(prices, 26);\n  const macd = ema12 - ema26;\n  \n  const macdLine = [macd];\n  const signal = calculateEMA(macdLine, 9);\n  \n  return {\n    macd: macd,\n    signal: signal,\n    histogram: macd - signal\n  };\n}\n\n// Volume Analysis\nfunction calculateVolumeRatio(ohlcData) {\n  if (ohlcData.length < 20) return 1.0;\n  \n  const currentVolume = parseFloat(ohlcData[ohlcData.length - 1].volume || 0);\n  const avgVolume = ohlcData.slice(-20).reduce((sum, candle) => \n    sum + parseFloat(candle.volume || 0), 0) / 20;\n  \n  return avgVolume > 0 ? currentVolume / avgVolume : 1.0;\n}\n\n// Momentum Calculation\nfunction calculateMomentum(prices, period = 10) {\n  if (prices.length < period) return 0;\n  const current = prices[prices.length - 1];\n  const previous = prices[prices.length - period];\n  return previous > 0 ? ((current - previous) / previous) * 100 : 0;\n}\n\n// Enhanced Candle Pattern Detection\nfunction detectCandlePattern(candle) {\n  if (!candle) return \"NORMAL\";\n  \n  const open = parseFloat(candle.open || 0);\n  const high = parseFloat(candle.high || 0);\n  const low = parseFloat(candle.low || 0);\n  const close = parseFloat(candle.close || 0);\n  \n  const body = Math.abs(close - open);\n  const upperShadow = high - Math.max(open, close);\n  const lowerShadow = Math.min(open, close) - low;\n  const totalRange = high - low;\n  \n  if (totalRange === 0) return \"NORMAL\";\n  \n  // Pattern detection logic\n  if (body < totalRange * 0.1) return \"DOJI\";\n  if (lowerShadow > body * 2 && upperShadow < body * 0.5) return \"HAMMER\";\n  if (upperShadow > body * 2 && lowerShadow < body * 0.5) return \"SHOOTING_STAR\";\n  if (upperShadow < totalRange * 0.05 && lowerShadow < totalRange * 0.05) return \"MARUBOZU\";\n  \n  return \"NORMAL\";\n}\n\n// Market Strength Analysis\nfunction analyzeMarketStrength(rsi, macd, momentum, volumeRatio) {\n  let strength = 0;\n  let signals = [];\n  \n  // RSI Analysis\n  if (rsi < 30) {\n    strength += 2;\n    signals.push(\"RSI_OVERSOLD\");\n  } else if (rsi > 70) {\n    strength -= 2;\n    signals.push(\"RSI_OVERBOUGHT\");\n  }\n  \n  // MACD Analysis\n  if (macd.macd > 0 && macd.histogram > 0) {\n    strength += 1.5;\n    signals.push(\"MACD_BULLISH\");\n  } else if (macd.macd < 0 && macd.histogram < 0) {\n    strength -= 1.5;\n    signals.push(\"MACD_BEARISH\");\n  }\n  \n  // Momentum Analysis\n  if (momentum > 2) {\n    strength += 1;\n    signals.push(\"MOMENTUM_STRONG_BULLISH\");\n  } else if (momentum < -2) {\n    strength -= 1;\n    signals.push(\"MOMENTUM_STRONG_BEARISH\");\n  }\n  \n  // Volume Analysis\n  if (volumeRatio > 1.5) {\n    strength += 0.5;\n    signals.push(\"VOLUME_SURGE\");\n  }\n  \n  return { strength, signals };\n}\n\n// Extract and calculate indicators\nconst closePrices = ohlcData.map(d => parseFloat(d.close || 0)).filter(p => p > 0);\nconst lastCandle = ohlcData[ohlcData.length - 1];\n\nconst rsi = calculateRSI(closePrices);\nconst macd = calculateMACD(closePrices);\nconst momentum = calculateMomentum(closePrices);\nconst volumeRatio = calculateVolumeRatio(ohlcData);\nconst candlePattern = detectCandlePattern(lastCandle);\nconst marketAnalysis = analyzeMarketStrength(rsi, macd, momentum, volumeRatio);\n\n// Get sentiment from previous node\nconst sentiment = $node['Market Sentiment API'].json.sentiment || 'NEUTRAL';\n\n// Compile comprehensive indicators\nconst indicators = {\n  // Basic Indicators\n  rsi: Math.round(rsi * 100) / 100,\n  macd: {\n    macd: Math.round(macd.macd * 100) / 100,\n    signal: Math.round(macd.signal * 100) / 100,\n    histogram: Math.round(macd.histogram * 100) / 100\n  },\n  momentum: Math.round(momentum * 100) / 100,\n  volumeRatio: Math.round(volumeRatio * 100) / 100,\n  \n  // Market Data\n  spotPrice: currentPrice,\n  vix: vix,\n  sentiment: sentiment,\n  candlePattern: candlePattern,\n  \n  // Analysis Results\n  marketStrength: Math.round(marketAnalysis.strength * 100) / 100,\n  detectedSignals: marketAnalysis.signals,\n  signalCount: marketAnalysis.signals.length,\n  \n  // Market Conditions\n  volatilityRegime: vix > 20 ? \"HIGH\" : vix > 15 ? \"MEDIUM\" : \"LOW\",\n  trendDirection: marketAnalysis.strength > 1 ? \"BULLISH\" : \n                  marketAnalysis.strength < -1 ? \"BEARISH\" : \"SIDEWAYS\",\n  \n  // Additional Context\n  timestamp: new Date().toISOString(),\n  dataPoints: closePrices.length,\n  priceChange: closePrices.length > 1 ? \n    Math.round(((closePrices[closePrices.length - 1] - closePrices[closePrices.length - 2]) / \n    closePrices[closePrices.length - 2]) * 10000) / 100 : 0\n};\n\nreturn { indicators };"
+      },
+      "id": "technical-indicators",
+      "name": "Calculate Technical Indicators",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2380, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enhanced Writers Zone Detection with Dhan Option Chain\nconst optionChainData = $node['Build Option Chain from Master'].json;\nconst ceOptions = optionChainData.ceOptions || [];\nconst peOptions = optionChainData.peOptions || [];\nconst spotPrice = optionChainData.spotPrice;\nconst atmStrike = optionChainData.atmStrike;\n\n// Initialize analysis variables\nlet maxCELTP = 0;\nlet maxPELTP = 0;\nlet maxCEStrike = 0;\nlet maxPEStrike = 0;\nlet totalCEValue = 0;\nlet totalPEValue = 0;\n\n// Arrays to store option data for analysis\nconst ceAnalysis = [];\nconst peAnalysis = [];\nconst significantLevels = [];\n\n// Process CE Options\nceOptions.forEach(option => {\n  const strike = option.strike;\n  const ltp = option.ltp;\n  \n  if (strike > 0 && ltp > 0) {\n    ceAnalysis.push({ strike, ltp, type: 'CE', distanceFromATM: option.distanceFromATM });\n    totalCEValue += ltp;\n    \n    if (ltp > maxCELTP) {\n      maxCELTP = ltp;\n      maxCEStrike = strike;\n    }\n  }\n});\n\n// Process PE Options\npeOptions.forEach(option => {\n  const strike = option.strike;\n  const ltp = option.ltp;\n  \n  if (strike > 0 && ltp > 0) {\n    peAnalysis.push({ strike, ltp, type: 'PE', distanceFromATM: option.distanceFromATM });\n    totalPEValue += ltp;\n    \n    if (ltp > maxPELTP) {\n      maxPELTP = ltp;\n      maxPEStrike = strike;\n    }\n  }\n});\n\n// Calculate Put-Call Premium Ratio\nconst putCallPremiumRatio = totalCEValue > 0 ? totalPEValue / totalCEValue : 1.0;\n\n// Professional Writers Zone Analysis\nfunction analyzeWritersZone() {\n  let analysis = {\n    zone: 'NEUTRAL',\n    confidence: 0,\n    reasoning: [],\n    supportLevels: [],\n    resistanceLevels: [],\n    marketStructure: 'BALANCED'\n  };\n  \n  // Primary Analysis: Price position relative to ATM and max premium strikes\n  const distanceFromATM = Math.abs(spotPrice - atmStrike);\n  const distanceFromMaxCE = Math.abs(spotPrice - maxCEStrike);\n  const distanceFromMaxPE = Math.abs(spotPrice - maxPEStrike);\n  \n  // Zone determination based on price position and premium distribution\n  if (spotPrice > atmStrike + 100) {\n    analysis.zone = 'BULLISH';\n    analysis.confidence += 0.3;\n    analysis.reasoning.push('Price trading significantly above ATM');\n  } else if (spotPrice < atmStrike - 100) {\n    analysis.zone = 'BEARISH';\n    analysis.confidence += 0.3;\n    analysis.reasoning.push('Price trading significantly below ATM');\n  }\n  \n  // Premium Ratio Analysis\n  if (putCallPremiumRatio > 1.2) {\n    analysis.marketStructure = 'PUT_PREMIUM_HIGH';\n    if (analysis.zone === 'BEARISH') {\n      analysis.confidence += 0.3;\n      analysis.reasoning.push('High Put premium confirms bearish sentiment');\n    } else if (analysis.zone === 'NEUTRAL') {\n      analysis.zone = 'BEARISH';\n      analysis.confidence += 0.2;\n      analysis.reasoning.push('High Put premium suggests bearish bias');\n    }\n  } else if (putCallPremiumRatio < 0.8) {\n    analysis.marketStructure = 'CALL_PREMIUM_HIGH';\n    if (analysis.zone === 'BULLISH') {\n      analysis.confidence += 0.3;\n      analysis.reasoning.push('High Call premium confirms bullish sentiment');\n    } else if (analysis.zone === 'NEUTRAL') {\n      analysis.zone = 'BULLISH';\n      analysis.confidence += 0.2;\n      analysis.reasoning.push('High Call premium suggests bullish bias');\n    }\n  } else {\n    analysis.marketStructure = 'BALANCED';\n    analysis.reasoning.push('Balanced premium distribution indicates neutral sentiment');\n  }\n  \n  // ATM Analysis\n  const atmCE = ceOptions.find(opt => opt.strike === atmStrike);\n  const atmPE = peOptions.find(opt => opt.strike === atmStrike);\n  \n  if (atmCE && atmPE) {\n    const atmSkew = atmCE.ltp / atmPE.ltp;\n    if (atmSkew > 1.2) {\n      analysis.confidence += 0.1;\n      analysis.reasoning.push('ATM Call premium higher than Put (bullish skew)');\n    } else if (atmSkew < 0.8) {\n      analysis.confidence += 0.1;\n      analysis.reasoning.push('ATM Put premium higher than Call (bearish skew)');\n    }\n  }\n  \n  // Support and Resistance Levels\n  const sortedPEStrikes = peOptions\n    .filter(opt => opt.strike <= spotPrice && opt.ltp > 5)\n    .sort((a, b) => b.ltp - a.ltp)\n    .slice(0, 3)\n    .map(opt => opt.strike);\n  \n  const sortedCEStrikes = ceOptions\n    .filter(opt => opt.strike >= spotPrice && opt.ltp > 5)\n    .sort((a, b) => b.ltp - a.ltp)\n    .slice(0, 3)\n    .map(opt => opt.strike);\n  \n  analysis.supportLevels = sortedPEStrikes;\n  analysis.resistanceLevels = sortedCEStrikes;\n  \n  // Final confidence adjustment\n  analysis.confidence = Math.min(analysis.confidence, 1.0);\n  \n  if (analysis.confidence < 0.3) {\n    analysis.zone = 'NEUTRAL';\n    analysis.reasoning.push('Insufficient conviction for directional bias');\n  }\n  \n  return analysis;\n}\n\n// Perform the analysis\nconst writersAnalysis = analyzeWritersZone();\n\n// Compile comprehensive results\nconst result = {\n  // Primary Results\n  writersZone: writersAnalysis.zone,\n  confidence: Math.round(writersAnalysis.confidence * 100) / 100,\n  \n  // Premium Data\n  maxCELTP: maxCELTP,\n  maxPELTP: maxPELTP,\n  maxCEStrike: maxCEStrike,\n  maxPEStrike: maxPEStrike,\n  totalCEValue: Math.round(totalCEValue * 100) / 100,\n  totalPEValue: Math.round(totalPEValue * 100) / 100,\n  putCallPremiumRatio: Math.round(putCallPremiumRatio * 100) / 100,\n  \n  // Significant Levels\n  supportLevels: writersAnalysis.supportLevels,\n  resistanceLevels: writersAnalysis.resistanceLevels,\n  \n  // Analysis Details\n  reasoning: writersAnalysis.reasoning,\n  marketStructure: writersAnalysis.marketStructure,\n  \n  // Market Context\n  currentPrice: spotPrice,\n  atmStrike: atmStrike,\n  distanceFromATM: Math.abs(spotPrice - atmStrike),\n  \n  // Statistics\n  ceOptionsAnalyzed: ceAnalysis.length,\n  peOptionsAnalyzed: peAnalysis.length,\n  \n  // Timestamp\n  timestamp: new Date().toISOString()\n};\n\nreturn result;"
+      },
+      "id": "writers-zone-analysis",
+      "name": "Writers Zone Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2600, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "{{$env.AI_MODEL_URL}}/predict",
+        "headers": {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer {{$env.AI_API_KEY}}"
+        },
+        "body": {
+          "spotPrice": "{{$node['Calculate Technical Indicators'].json.indicators.spotPrice}}",
+          "rsi": "{{$node['Calculate Technical Indicators'].json.indicators.rsi}}",
+          "macd": "{{$node['Calculate Technical Indicators'].json.indicators.macd.macd}}",
+          "momentum": "{{$node['Calculate Technical Indicators'].json.indicators.momentum}}",
+          "volumeRatio": "{{$node['Calculate Technical Indicators'].json.indicators.volumeRatio}}",
+          "candlePattern": "{{$node['Calculate Technical Indicators'].json.indicators.candlePattern}}",
+          "vix": "{{$node['Calculate Technical Indicators'].json.indicators.vix}}",
+          "sentiment": "{{$node['Calculate Technical Indicators'].json.indicators.sentiment}}",
+          "writersZone": "{{$node['Writers Zone Analysis'].json.writersZone}}",
+          "marketStrength": "{{$node['Calculate Technical Indicators'].json.indicators.marketStrength}}",
+          "detectedSignals": "{{$node['Calculate Technical Indicators'].json.indicators.detectedSignals}}",
+          "writersConfidence": "{{$node['Writers Zone Analysis'].json.confidence}}",
+          "putCallPremiumRatio": "{{$node['Writers Zone Analysis'].json.putCallPremiumRatio}}",
+          "supportLevels": "{{$node['Writers Zone Analysis'].json.supportLevels}}",
+          "resistanceLevels": "{{$node['Writers Zone Analysis'].json.resistanceLevels}}"
+        }
+      },
+      "id": "ai-trade-confirmation",
+      "name": "AI Trade Confirmation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2820, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "{{$node['AI Trade Confirmation'].json.signal}}",
+              "operation": "notEqual",
+              "value2": "HOLD"
+            }
+          ],
+          "number": [
+            {
+              "value1": "{{$node['AI Trade Confirmation'].json.confidence}}",
+              "operation": "largerEqual",
+              "value2": 0.75
+            }
+          ]
+        }
+      },
+      "id": "signal-confidence-filter",
+      "name": "Signal & Confidence Filter",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [3040, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "spreadsheet",
+        "operation": "appendOrUpdate",
+        "documentId": "{{$env.GOOGLE_SHEET_ID}}",
+        "sheetName": "Dhan_Signals",
+        "dataMode": "defineBelow",
+        "valueInputMode": "raw",
+        "columnToMatchOn": "A",
+        "valueToMatchOn": "={{new Date().toISOString()}}",
+        "fieldsUi": {
+          "values": [
+            {
+              "fieldId": "Timestamp",
+              "fieldValue": "={{new Date().toISOString()}}"
+            },
+            {
+              "fieldId": "Signal",
+              "fieldValue": "={{$node['AI Trade Confirmation'].json.signal}}"
+            },
+            {
+              "fieldId": "Confidence",
+              "fieldValue": "={{$node['AI Trade Confirmation'].json.confidence}}"
+            },
+            {
+              "fieldId": "RSI",
+              "fieldValue": "={{$node['Calculate Technical Indicators'].json.indicators.rsi}}"
+            },
+            {
+              "fieldId": "MACD",
+              "fieldValue": "={{$node['Calculate Technical Indicators'].json.indicators.macd.macd}}"
+            },
+            {
+              "fieldId": "Momentum",
+              "fieldValue": "={{$node['Calculate Technical Indicators'].json.indicators.momentum}}"
+            },
+            {
+              "fieldId": "Volume Ratio",
+              "fieldValue": "={{$node['Calculate Technical Indicators'].json.indicators.volumeRatio}}"
+            },
+            {
+              "fieldId": "VIX",
+              "fieldValue": "={{$node['Calculate Technical Indicators'].json.indicators.vix}}"
+            },
+            {
+              "fieldId": "Sentiment",
+              "fieldValue": "={{$node['Calculate Technical Indicators'].json.indicators.sentiment}}"
+            },
+            {
+              "fieldId": "Writers Zone",
+              "fieldValue": "={{$node['Writers Zone Analysis'].json.writersZone}}"
+            },
+            {
+              "fieldId": "Candle Pattern",
+              "fieldValue": "={{$node['Calculate Technical Indicators'].json.indicators.candlePattern}}"
+            },
+            {
+              "fieldId": "Spot Price",
+              "fieldValue": "={{$node['Calculate Technical Indicators'].json.indicators.spotPrice}}"
+            },
+            {
+              "fieldId": "Market Strength",
+              "fieldValue": "={{$node['Calculate Technical Indicators'].json.indicators.marketStrength}}"
+            },
+            {
+              "fieldId": "Put Call Premium Ratio",
+              "fieldValue": "={{$node['Writers Zone Analysis'].json.putCallPremiumRatio}}"
+            },
+            {
+              "fieldId": "Writers Confidence",
+              "fieldValue": "={{$node['Writers Zone Analysis'].json.confidence}}"
+            },
+            {
+              "fieldId": "ATM Strike",
+              "fieldValue": "={{$node['Writers Zone Analysis'].json.atmStrike}}"
+            }
+          ]
+        }
+      },
+      "id": "log-signal-sheets",
+      "name": "Log Signal to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [3260, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enhanced Strike Selection and Order Preparation for Dhan\nconst signal = $node['AI Trade Confirmation'].json.signal;\nconst optionChainData = $node['Build Option Chain from Master'].json;\nconst spotPrice = optionChainData.spotPrice;\nconst atmStrike = optionChainData.atmStrike;\nconst ceOptions = optionChainData.ceOptions;\nconst peOptions = optionChainData.peOptions;\n\nlet selectedOption;\nlet orderType;\nlet quantity = 25; // BANKNIFTY lot size\n\n// Determine option selection based on signal\nif (signal === 'BUY_CE') {\n  // Select ATM or slightly OTM CE\n  selectedOption = ceOptions.find(opt => opt.strike === atmStrike) || \n                   ceOptions.find(opt => opt.strike === atmStrike + 100) ||\n                   ceOptions[0];\n  orderType = 'BUY';\n} else if (signal === 'BUY_PE') {\n  // Select ATM or slightly OTM PE\n  selectedOption = peOptions.find(opt => opt.strike === atmStrike) || \n                   peOptions.find(opt => opt.strike === atmStrike - 100) ||\n                   peOptions[0];\n  orderType = 'BUY';\n} else {\n  throw new Error('Invalid signal: ' + signal);\n}\n\nif (!selectedOption) {\n  throw new Error('No suitable option found for signal: ' + signal);\n}\n\n// Validate option has reasonable premium\nif (selectedOption.ltp < 5) {\n  throw new Error(`Option premium too low: ${selectedOption.ltp}`);\n}\n\n// Create Dhan order object\nconst dhanOrder = {\n  \"securityId\": selectedOption.securityId,\n  \"exchangeSegment\": \"NSE_FNO\",\n  \"transactionType\": orderType,\n  \"quantity\": quantity,\n  \"orderType\": \"MARKET\",\n  \"productType\": \"INTRADAY\",\n  \"price\": 0,\n  \"triggerPrice\": 0,\n  \"disclosedQuantity\": 0,\n  \"validity\": \"DAY\",\n  \"afterMarketOrder\": false,\n  \"boProfitValue\": 0,\n  \"boStopLossValue\": 0\n};\n\n// Return comprehensive order data\nreturn {\n  // Order Details\n  dhanOrder: dhanOrder,\n  selectedOption: selectedOption,\n  signal: signal,\n  orderType: orderType,\n  quantity: quantity,\n  \n  // Market Context\n  spotPrice: spotPrice,\n  atmStrike: atmStrike,\n  selectedStrike: selectedOption.strike,\n  expectedPremium: selectedOption.ltp,\n  \n  // Risk Metrics\n  maxLoss: selectedOption.ltp * quantity,\n  breakeven: selectedOption.optionType === 'CE' ? \n    selectedOption.strike + selectedOption.ltp :\n    selectedOption.strike - selectedOption.ltp,\n  \n  // Additional Info\n  optionType: selectedOption.optionType,\n  expiry: selectedOption.expiry,\n  tradingSymbol: selectedOption.tradingSymbol,\n  timestamp: new Date().toISOString()\n};"
+      },
+      "id": "prepare-dhan-order",
+      "name": "Prepare Dhan Order",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3480, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.dhan.co/v2/orders",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "access-token": "{{$node['Dhan Authentication'].json.data.access_token}}"
+        },
+        "body": "={{$node['Prepare Dhan Order'].json.dhanOrder}}"
+      },
+      "id": "place-entry-order",
+      "name": "Place Entry Order (Dhan)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [3700, 300]
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "wait-order-fill",
+      "name": "Wait for Order Fill",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [3920, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.dhan.co/v2/orders/{{$node['Place Entry Order (Dhan)'].json.data.orderId}}",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "access-token": "{{$node['Dhan Authentication'].json.data.access_token}}"
+        }
+      },
+      "id": "get-order-status",
+      "name": "Get Order Status & Fill Price",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [4140, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enhanced SL & Target Calculation for Dhan\nconst orderStatus = $node['Get Order Status & Fill Price'].json.data;\nconst orderData = $node['Prepare Dhan Order'].json;\n\n// Validate order execution\nif (orderStatus.orderStatus !== 'TRADED') {\n  throw new Error(`Order not executed. Status: ${orderStatus.orderStatus}`);\n}\n\n// Get execution details\nconst fillPrice = parseFloat(orderStatus.price);\nconst quantity = parseInt(orderStatus.quantity);\nconst securityId = orderStatus.securityId;\nconst tradingSymbol = orderData.selectedOption.tradingSymbol;\n\n// Validate fill price\nif (!fillPrice || fillPrice <= 0) {\n  throw new Error(`Invalid fill price: ${fillPrice}`);\n}\n\n// Calculate SL and Target levels with enhanced logic\nconst stopLossPrice = Math.max(fillPrice - 15, 0.5); // 15 points SL, minimum 0.5\nconst targetPrice = fillPrice + 30; // 30 points target\n\n// Create Stop Loss Order for Dhan\nconst stopLossOrder = {\n  \"securityId\": securityId,\n  \"exchangeSegment\": \"NSE_FNO\",\n  \"transactionType\": \"SELL\",\n  \"quantity\": quantity,\n  \"orderType\": \"SL-M\",\n  \"productType\": \"INTRADAY\",\n  \"price\": 0,\n  \"triggerPrice\": stopLossPrice,\n  \"disclosedQuantity\": 0,\n  \"validity\": \"DAY\",\n  \"afterMarketOrder\": false,\n  \"boProfitValue\": 0,\n  \"boStopLossValue\": 0\n};\n\n// Create Target Order for Dhan\nconst targetOrder = {\n  \"securityId\": securityId,\n  \"exchangeSegment\": \"NSE_FNO\",\n  \"transactionType\": \"SELL\",\n  \"quantity\": quantity,\n  \"orderType\": \"LIMIT\",\n  \"productType\": \"INTRADAY\",\n  \"price\": targetPrice,\n  \"triggerPrice\": 0,\n  \"disclosedQuantity\": 0,\n  \"validity\": \"DAY\",\n  \"afterMarketOrder\": false,\n  \"boProfitValue\": 0,\n  \"boStopLossValue\": 0\n};\n\n// Calculate risk metrics\nconst riskAmount = fillPrice - stopLossPrice;\nconst rewardAmount = targetPrice - fillPrice;\nconst riskRewardRatio = riskAmount > 0 ? rewardAmount / riskAmount : 0;\n\n// Return comprehensive exit strategy data\nreturn {\n  // Entry Details\n  entryOrderId: orderStatus.orderId,\n  fillPrice: fillPrice,\n  quantity: quantity,\n  securityId: securityId,\n  tradingSymbol: tradingSymbol,\n  \n  // Exit Levels\n  stopLoss: stopLossPrice,\n  target: targetPrice,\n  \n  // Order Objects\n  stopLossOrder: stopLossOrder,\n  targetOrder: targetOrder,\n  \n  // Risk Metrics\n  riskAmount: Math.round(riskAmount * 100) / 100,\n  rewardAmount: Math.round(rewardAmount * 100) / 100,\n  riskRewardRatio: Math.round(riskRewardRatio * 100) / 100,\n  maxLoss: Math.round(riskAmount * quantity * 100) / 100,\n  maxProfit: Math.round(rewardAmount * quantity * 100) / 100,\n  \n  // Execution Details\n  executionTime: orderStatus.createTime,\n  orderStatus: orderStatus.orderStatus,\n  exchangeOrderId: orderStatus.exchangeOrderId,\n  \n  // Timestamp\n  timestamp: new Date().toISOString()\n};"
+      },
+      "id": "calculate-exit-levels",
+      "name": "Calculate SL & Target Levels",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4360, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.dhan.co/v2/orders",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "access-token": "{{$node['Dhan Authentication'].json.data.access_token}}"
+        },
+        "body": "={{$node['Calculate SL & Target Levels'].json.stopLossOrder}}"
+      },
+      "id": "place-stop-loss",
+      "name": "Place Stop Loss Order",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [4580, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.dhan.co/v2/orders",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "access-token": "{{$node['Dhan Authentication'].json.data.access_token}}"
+        },
+        "body": "={{$node['Calculate SL & Target Levels'].json.targetOrder}}"
+      },
+      "id": "place-target-order",
+      "name": "Place Target Order",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [4580, 400]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "spreadsheet",
+        "operation": "appendOrUpdate",
+        "documentId": "{{$env.GOOGLE_SHEET_ID}}",
+        "sheetName": "Dhan_Active_Trades",
+        "dataMode": "defineBelow",
+        "valueInputMode": "raw",
+        "columnToMatchOn": "A",
+        "valueToMatchOn": "={{$node['Calculate SL & Target Levels'].json.entryOrderId}}",
+        "fieldsUi": {
+          "values": [
+            {
+              "fieldId": "Entry Order ID",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.entryOrderId}}"
+            },
+            {
+              "fieldId": "SL Order ID",
+              "fieldValue": "={{$node['Place Stop Loss Order'].json.data.orderId}}"
+            },
+            {
+              "fieldId": "Target Order ID",
+              "fieldValue": "={{$node['Place Target Order'].json.data.orderId}}"
+            },
+            {
+              "fieldId": "Trading Symbol",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.tradingSymbol}}"
+            },
+            {
+              "fieldId": "Security ID",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.securityId}}"
+            },
+            {
+              "fieldId": "Entry Price",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.fillPrice}}"
+            },
+            {
+              "fieldId": "Stop Loss",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.stopLoss}}"
+            },
+            {
+              "fieldId": "Target",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.target}}"
+            },
+            {
+              "fieldId": "Quantity",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.quantity}}"
+            },
+            {
+              "fieldId": "Risk Reward Ratio",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.riskRewardRatio}}"
+            },
+            {
+              "fieldId": "Max Loss",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.maxLoss}}"
+            },
+            {
+              "fieldId": "Max Profit",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.maxProfit}}"
+            },
+            {
+              "fieldId": "Status",
+              "fieldValue": "ACTIVE"
+            },
+            {
+              "fieldId": "Timestamp",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.timestamp}}"
+            }
+          ]
+        }
+      },
+      "id": "log-active-trade",
+      "name": "Log Active Trade to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [4800, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "spreadsheet",
+        "operation": "appendOrUpdate",
+        "documentId": "{{$env.GOOGLE_SHEET_ID}}",
+        "sheetName": "Dhan_Trade_Summary",
+        "dataMode": "defineBelow",
+        "valueInputMode": "raw",
+        "columnToMatchOn": "A",
+        "valueToMatchOn": "={{$node['Calculate SL & Target Levels'].json.entryOrderId}}",
+        "fieldsUi": {
+          "values": [
+            {
+              "fieldId": "Entry Order ID",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.entryOrderId}}"
+            },
+            {
+              "fieldId": "Timestamp",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.timestamp}}"
+            },
+            {
+              "fieldId": "Signal",
+              "fieldValue": "={{$node['AI Trade Confirmation'].json.signal}}"
+            },
+            {
+              "fieldId": "Confidence",
+              "fieldValue": "={{$node['AI Trade Confirmation'].json.confidence}}"
+            },
+            {
+              "fieldId": "Trading Symbol",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.tradingSymbol}}"
+            },
+            {
+              "fieldId": "Entry Price",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.fillPrice}}"
+            },
+            {
+              "fieldId": "Stop Loss",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.stopLoss}}"
+            },
+            {
+              "fieldId": "Target",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.target}}"
+            },
+            {
+              "fieldId": "Quantity",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.quantity}}"
+            },
+            {
+              "fieldId": "Risk Reward Ratio",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.riskRewardRatio}}"
+            },
+            {
+              "fieldId": "Max Loss",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.maxLoss}}"
+            },
+            {
+              "fieldId": "Max Profit",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.maxProfit}}"
+            },
+            {
+              "fieldId": "Writers Zone",
+              "fieldValue": "={{$node['Writers Zone Analysis'].json.writersZone}}"
+            },
+            {
+              "fieldId": "Market Strength",
+              "fieldValue": "={{$node['Calculate Technical Indicators'].json.indicators.marketStrength}}"
+            },
+            {
+              "fieldId": "VIX",
+              "fieldValue": "={{$node['Calculate Technical Indicators'].json.indicators.vix}}"
+            },
+            {
+              "fieldId": "Status",
+              "fieldValue": "ACTIVE"
+            }
+          ]
+        }
+      },
+      "id": "log-trade-summary",
+      "name": "Log Trade Summary",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [5020, 300]
+    }
+  ],
+  "connections": {
+    "Trading Hours Cron": {
+      "main": [
+        [
+          {
+            "node": "Trading Hours Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trading Hours Filter": {
+      "main": [
+        [
+          {
+            "node": "Dhan Authentication",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dhan Authentication": {
+      "main": [
+        [
+          {
+            "node": "Get Bank Nifty OHLC Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Bank Nifty OHLC Data": {
+      "main": [
+        [
+          {
+            "node": "Get Bank Nifty LTP",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Bank Nifty LTP": {
+      "main": [
+        [
+          {
+            "node": "Get India VIX Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get India VIX Data": {
+      "main": [
+        [
+          {
+            "node": "VIX Filter (< 18)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VIX Filter (< 18)": {
+      "main": [
+        [
+          {
+            "node": "Market Sentiment API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Market Sentiment API": {
+      "main": [
+        [
+          {
+            "node": "Get Dhan Instrument Master",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Dhan Instrument Master": {
+      "main": [
+        [
+          {
+            "node": "Build Option Chain from Master",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Option Chain from Master": {
+      "main": [
+        [
+          {
+            "node": "Calculate Technical Indicators",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Technical Indicators": {
+      "main": [
+        [
+          {
+            "node": "Writers Zone Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Writers Zone Analysis": {
+      "main": [
+        [
+          {
+            "node": "AI Trade Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Trade Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Signal & Confidence Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signal & Confidence Filter": {
+      "main": [
+        [
+          {
+            "node": "Log Signal to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Signal to Sheets": {
+      "main": [
+        [
+          {
+            "node": "Prepare Dhan Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Dhan Order": {
+      "main": [
+        [
+          {
+            "node": "Place Entry Order (Dhan)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Place Entry Order (Dhan)": {
+      "main": [
+        [
+          {
+            "node": "Wait for Order Fill",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Order Fill": {
+      "main": [
+        [
+          {
+            "node": "Get Order Status & Fill Price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Order Status & Fill Price": {
+      "main": [
+        [
+          {
+            "node": "Calculate SL & Target Levels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate SL & Target Levels": {
+      "main": [
+        [
+          {
+            "node": "Place Stop Loss Order",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Place Target Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Place Stop Loss Order": {
+      "main": [
+        [
+          {
+            "node": "Log Active Trade to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Place Target Order": {
+      "main": [
+        [
+          {
+            "node": "Log Active Trade to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Active Trade to Sheets": {
+      "main": [
+        [
+          {
+            "node": "Log Trade Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1"
+}

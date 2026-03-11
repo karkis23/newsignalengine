@@ -1,0 +1,336 @@
+{
+  "name": "Exit Order Monitor - Auto Cancel Opposite Order",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/2 9-15 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "monitor-cron",
+      "name": "Monitor Every 2 Minutes",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [180, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://apiconnect.angelbroking.com/rest/auth/angelbroking/user/v1/loginByPassword",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "X-UserType": "USER",
+          "X-SourceID": "WEB",
+          "X-ClientLocalIP": "192.168.1.1",
+          "X-ClientPublicIP": "106.193.147.98",
+          "X-MACAddress": "fe80::216:3eff:fe4e:9729",
+          "X-PrivateKey": "{{$env.ANGEL_API_KEY}}"
+        },
+        "body": {
+          "clientcode": "{{$env.ANGEL_CLIENT_ID}}",
+          "password": "{{$env.ANGEL_PASSWORD}}",
+          "totp": "{{$env.ANGEL_TOTP}}"
+        }
+      },
+      "id": "angel-login-monitor",
+      "name": "Angel One Login",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://apiconnect.angelbroking.com/rest/secure/angelbroking/order/v1/getOrderBook",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "X-UserType": "USER",
+          "X-SourceID": "WEB",
+          "X-ClientLocalIP": "192.168.1.1",
+          "X-ClientPublicIP": "106.193.147.98",
+          "X-MACAddress": "fe80::216:3eff:fe4e:9729",
+          "X-PrivateKey": "{{$env.ANGEL_API_KEY}}",
+          "Authorization": "Bearer {{$node['Angel One Login'].json.data.jwtToken}}"
+        },
+        "body": {}
+      },
+      "id": "get-order-book",
+      "name": "Get Current Order Book",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [620, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "spreadsheet",
+        "operation": "read",
+        "documentId": "{{$env.GOOGLE_SHEET_ID}}",
+        "sheetName": "Active_Exit_Orders",
+        "options": {}
+      },
+      "id": "get-active-orders",
+      "name": "Get Active Exit Orders",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [840, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Monitor exit orders and cancel opposite when one is executed\nconst orderBook = $node['Get Current Order Book'].json.data;\nconst activeExitOrders = $node['Get Active Exit Orders'].json;\n\nconst results = [];\nconst ordersToCancel = [];\nconst ordersToUpdate = [];\n\n// Process each active exit order pair\nactiveExitOrders.forEach(exitOrderRow => {\n  if (exitOrderRow.Status !== 'ACTIVE') return;\n  \n  const slOrderId = exitOrderRow['SL Order ID'];\n  const targetOrderId = exitOrderRow['Target Order ID'];\n  const entryOrderId = exitOrderRow['Entry Order ID'];\n  \n  // Find these orders in the current order book\n  const slOrder = orderBook.find(order => order.orderid === slOrderId);\n  const targetOrder = orderBook.find(order => order.orderid === targetOrderId);\n  \n  let executedOrder = null;\n  let orderToCancel = null;\n  let exitType = null;\n  let exitPrice = null;\n  \n  // Check if SL order is executed\n  if (slOrder && (slOrder.orderstatus === 'complete' || slOrder.orderstatus === 'executed')) {\n    executedOrder = slOrder;\n    orderToCancel = targetOrderId;\n    exitType = 'STOP_LOSS';\n    exitPrice = parseFloat(slOrder.averageprice || slOrder.price);\n  }\n  // Check if Target order is executed\n  else if (targetOrder && (targetOrder.orderstatus === 'complete' || targetOrder.orderstatus === 'executed')) {\n    executedOrder = targetOrder;\n    orderToCancel = slOrderId;\n    exitType = 'TARGET';\n    exitPrice = parseFloat(targetOrder.averageprice || targetOrder.price);\n  }\n  \n  if (executedOrder && orderToCancel) {\n    // Add order to cancel list\n    ordersToCancel.push({\n      orderid: orderToCancel,\n      variety: 'NORMAL'\n    });\n    \n    // Calculate P&L\n    const entryPrice = parseFloat(exitOrderRow['Entry Price']);\n    const quantity = parseInt(exitOrderRow['Quantity']);\n    const pnl = (exitPrice - entryPrice) * quantity;\n    \n    // Update the exit order status\n    ordersToUpdate.push({\n      entryOrderId: entryOrderId,\n      exitType: exitType,\n      exitPrice: exitPrice,\n      pnl: pnl,\n      executedOrderId: executedOrder.orderid,\n      timestamp: new Date().toISOString()\n    });\n    \n    results.push({\n      message: `${exitType} executed for ${exitOrderRow.Symbol}`,\n      entryOrderId: entryOrderId,\n      exitPrice: exitPrice,\n      pnl: pnl,\n      cancelOrderId: orderToCancel\n    });\n  }\n});\n\nreturn {\n  results,\n  ordersToCancel,\n  ordersToUpdate,\n  totalExecutions: results.length\n};"
+      },
+      "id": "analyze-exits",
+      "name": "Analyze Exit Executions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1060, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "{{$node['Analyze Exit Executions'].json.totalExecutions}}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "check-executions",
+      "name": "Check if Any Exits Executed",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1280, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process each order cancellation\nconst ordersToCancel = $node['Analyze Exit Executions'].json.ordersToCancel;\nconst cancelResults = [];\n\nfor (const order of ordersToCancel) {\n  cancelResults.push({\n    orderid: order.orderid,\n    variety: order.variety\n  });\n}\n\nreturn cancelResults;"
+      },
+      "id": "prepare-cancellations",
+      "name": "Prepare Order Cancellations",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://apiconnect.angelbroking.com/rest/secure/angelbroking/order/v1/cancelOrder",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "X-UserType": "USER",
+          "X-SourceID": "WEB",
+          "X-ClientLocalIP": "192.168.1.1",
+          "X-ClientPublicIP": "106.193.147.98",
+          "X-MACAddress": "fe80::216:3eff:fe4e:9729",
+          "X-PrivateKey": "{{$env.ANGEL_API_KEY}}",
+          "Authorization": "Bearer {{$node['Angel One Login'].json.data.jwtToken}}"
+        },
+        "body": {
+          "variety": "{{$json.variety}}",
+          "orderid": "{{$json.orderid}}"
+        }
+      },
+      "id": "cancel-opposite-orders",
+      "name": "Cancel Opposite Orders",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1720, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "spreadsheet",
+        "operation": "update",
+        "documentId": "{{$env.GOOGLE_SHEET_ID}}",
+        "sheetName": "Active_Exit_Orders",
+        "columnToMatchOn": "A",
+        "valueToMatchOn": "={{$json.entryOrderId}}",
+        "fieldsUi": {
+          "values": [
+            {
+              "fieldId": "Status",
+              "fieldValue": "COMPLETED"
+            },
+            {
+              "fieldId": "Exit Type",
+              "fieldValue": "={{$json.exitType}}"
+            },
+            {
+              "fieldId": "Exit Price",
+              "fieldValue": "={{$json.exitPrice}}"
+            },
+            {
+              "fieldId": "PnL",
+              "fieldValue": "={{$json.pnl}}"
+            },
+            {
+              "fieldId": "Exit Timestamp",
+              "fieldValue": "={{$json.timestamp}}"
+            }
+          ]
+        }
+      },
+      "id": "update-exit-status",
+      "name": "Update Exit Order Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1940, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "spreadsheet",
+        "operation": "update",
+        "documentId": "{{$env.GOOGLE_SHEET_ID}}",
+        "sheetName": "Trades",
+        "columnToMatchOn": "A",
+        "valueToMatchOn": "={{$json.entryOrderId}}",
+        "fieldsUi": {
+          "values": [
+            {
+              "fieldId": "Status",
+              "fieldValue": "CLOSED"
+            },
+            {
+              "fieldId": "Exit Price",
+              "fieldValue": "={{$json.exitPrice}}"
+            },
+            {
+              "fieldId": "PnL",
+              "fieldValue": "={{$json.pnl}}"
+            },
+            {
+              "fieldId": "Exit Type",
+              "fieldValue": "={{$json.exitType}}"
+            },
+            {
+              "fieldId": "Exit Timestamp",
+              "fieldValue": "={{$json.timestamp}}"
+            }
+          ]
+        }
+      },
+      "id": "update-trade-status",
+      "name": "Update Trade Status",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [2160, 300]
+    }
+  ],
+  "connections": {
+    "Monitor Every 2 Minutes": {
+      "main": [
+        [
+          {
+            "node": "Angel One Login",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Angel One Login": {
+      "main": [
+        [
+          {
+            "node": "Get Current Order Book",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Current Order Book": {
+      "main": [
+        [
+          {
+            "node": "Get Active Exit Orders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Active Exit Orders": {
+      "main": [
+        [
+          {
+            "node": "Analyze Exit Executions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyze Exit Executions": {
+      "main": [
+        [
+          {
+            "node": "Check if Any Exits Executed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check if Any Exits Executed": {
+      "main": [
+        [
+          {
+            "node": "Prepare Order Cancellations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Order Cancellations": {
+      "main": [
+        [
+          {
+            "node": "Cancel Opposite Orders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Cancel Opposite Orders": {
+      "main": [
+        [
+          {
+            "node": "Update Exit Order Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Exit Order Status": {
+      "main": [
+        [
+          {
+            "node": "Update Trade Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1"
+}

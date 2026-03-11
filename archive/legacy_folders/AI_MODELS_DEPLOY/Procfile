@@ -1,0 +1,1 @@
+web: gunicorn ai_model_api_fixed:app

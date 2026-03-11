@@ -1,0 +1,544 @@
+# SAMPLE TESTING DATA FOR TRADING BOT APIS
+# =========================================
+# Complete Test Cases for All Components
+
+## ================================================================
+## AI MODEL API TESTING DATA
+## ================================================================
+
+### TEST CASE 1: STRONG BULLISH SIGNAL
+```json
+{
+  "rsi": 28,
+  "macd": {
+    "macd": 2.1,
+    "signal": 1.5,
+    "histogram": 0.6
+  },
+  "momentum": 4.2,
+  "volumeRatio": 2.1,
+  "vix": 14,
+  "sentiment": "BULLISH",
+  "writersZone": "BULLISH",
+  "candlePattern": "HAMMER"
+}
+```
+**Expected Output:** BUY_CE with confidence > 0.85
+
+### TEST CASE 2: STRONG BEARISH SIGNAL
+```json
+{
+  "rsi": 78,
+  "macd": {
+    "macd": -1.8,
+    "signal": -1.2,
+    "histogram": -0.6
+  },
+  "momentum": -3.5,
+  "volumeRatio": 1.9,
+  "vix": 16,
+  "sentiment": "BEARISH",
+  "writersZone": "BEARISH",
+  "candlePattern": "SHOOTING_STAR"
+}
+```
+**Expected Output:** BUY_PE with confidence > 0.80
+
+### TEST CASE 3: HIGH VIX - NO TRADE
+```json
+{
+  "rsi": 25,
+  "macd": {
+    "macd": 1.5,
+    "signal": 1.0,
+    "histogram": 0.5
+  },
+  "momentum": 3.0,
+  "volumeRatio": 1.8,
+  "vix": 22,
+  "sentiment": "BULLISH",
+  "writersZone": "BULLISH",
+  "candlePattern": "NORMAL"
+}
+```
+**Expected Output:** HOLD with confidence 0.0
+
+### TEST CASE 4: MIXED SIGNALS - NEUTRAL
+```json
+{
+  "rsi": 52,
+  "macd": {
+    "macd": 0.2,
+    "signal": 0.1,
+    "histogram": 0.1
+  },
+  "momentum": 0.5,
+  "volumeRatio": 1.1,
+  "vix": 15,
+  "sentiment": "NEUTRAL",
+  "writersZone": "NEUTRAL",
+  "candlePattern": "DOJI"
+}
+```
+**Expected Output:** HOLD with low confidence
+
+### TEST CASE 5: MODERATE BULLISH
+```json
+{
+  "rsi": 42,
+  "macd": {
+    "macd": 0.8,
+    "signal": 0.5,
+    "histogram": 0.3
+  },
+  "momentum": 1.8,
+  "volumeRatio": 1.4,
+  "vix": 16,
+  "sentiment": "BULLISH",
+  "writersZone": "NEUTRAL",
+  "candlePattern": "MARUBOZU"
+}
+```
+**Expected Output:** BUY_CE with moderate confidence (0.6-0.75)
+
+### TEST CASE 6: CONFLICTING SIGNALS
+```json
+{
+  "rsi": 35,
+  "macd": {
+    "macd": -0.5,
+    "signal": -0.3,
+    "histogram": -0.2
+  },
+  "momentum": 2.0,
+  "volumeRatio": 0.9,
+  "vix": 17,
+  "sentiment": "BEARISH",
+  "writersZone": "BULLISH",
+  "candlePattern": "NORMAL"
+}
+```
+**Expected Output:** HOLD or low confidence signal
+
+## ================================================================
+## MARKET SENTIMENT API TESTING DATA
+## ================================================================
+
+### TEST CASE 1: CUSTOM BULLISH TEXT
+```json
+{
+  "text": "Indian stock market soars as Nifty hits record high with strong buying in banking and IT stocks. Sensex rallies over 500 points on positive global cues and robust earnings."
+}
+```
+**Expected Output:** BULLISH sentiment with high score
+
+### TEST CASE 2: CUSTOM BEARISH TEXT
+```json
+{
+  "text": "Market crashes as Nifty falls sharply due to selling pressure. Banking stocks decline amid concerns over rising interest rates and weak economic data."
+}
+```
+**Expected Output:** BEARISH sentiment with negative score
+
+### TEST CASE 3: NEUTRAL TEXT
+```json
+{
+  "text": "Weather forecast shows sunny skies for the weekend. Local restaurant opens new branch in the city center."
+}
+```
+**Expected Output:** NEUTRAL sentiment (not market relevant)
+
+### TEST CASE 4: MIXED MARKET NEWS
+```json
+{
+  "text": "Indian markets show mixed trends as Nifty gains while banking stocks face pressure. IT sector rallies but auto stocks decline on weak demand."
+}
+```
+**Expected Output:** NEUTRAL to slightly BULLISH/BEARISH
+
+## ================================================================
+## N8N SCRIPT NODES TESTING DATA
+## ================================================================
+
+### CALCULATE TECHNICAL INDICATORS NODE
+**Input (Candle Data):**
+```json
+{
+  "data": [
+    {
+      "timestamp": "2024-01-15T09:15:00",
+      "open": "45200",
+      "high": "45350",
+      "low": "45180",
+      "close": "45320",
+      "volume": "125000"
+    },
+    {
+      "timestamp": "2024-01-15T09:20:00",
+      "open": "45320",
+      "high": "45420",
+      "low": "45300",
+      "close": "45380",
+      "volume": "135000"
+    },
+    {
+      "timestamp": "2024-01-15T09:25:00",
+      "open": "45380",
+      "high": "45450",
+      "low": "45360",
+      "close": "45420",
+      "volume": "142000"
+    }
+  ]
+}
+```
+
+**Expected Output:**
+```json
+{
+  "indicators": {
+    "rsi": 65.4,
+    "macd": {
+      "macd": 1.2,
+      "signal": 0.8,
+      "histogram": 0.4
+    },
+    "momentum": 2.1,
+    "volumeRatio": 1.34,
+    "candlePattern": "NORMAL",
+    "spotPrice": 45420,
+    "vix": 16.5,
+    "sentiment": "BULLISH"
+  }
+}
+```
+
+### WRITERS ZONE DETECTION NODE
+**Input (Option Chain Data):**
+```json
+{
+  "ceData": [
+    {
+      "strikeprice": "45000",
+      "openinterest": "1250000",
+      "optiontype": "CE"
+    },
+    {
+      "strikeprice": "45100",
+      "openinterest": "980000",
+      "optiontype": "CE"
+    },
+    {
+      "strikeprice": "45200",
+      "openinterest": "1580000",
+      "optiontype": "CE"
+    }
+  ],
+  "peData": [
+    {
+      "strikeprice": "45000",
+      "openinterest": "1850000",
+      "optiontype": "PE"
+    },
+    {
+      "strikeprice": "45100",
+      "openinterest": "1200000",
+      "optiontype": "PE"
+    },
+    {
+      "strikeprice": "45200",
+      "openinterest": "890000",
+      "optiontype": "PE"
+    }
+  ],
+  "currentPrice": 45150
+}
+```
+
+**Expected Output:**
+```json
+{
+  "writersZone": "BEARISH",
+  "confidence": 0.75,
+  "maxCEOI": 1580000,
+  "maxPEOI": 1850000,
+  "maxCEStrike": 45200,
+  "maxPEStrike": 45000,
+  "putCallRatio": 1.17,
+  "reasoning": [
+    "Price below both max CE and PE OI strikes",
+    "High Put-Call ratio supports bearish view"
+  ]
+}
+```
+
+### CALCULATE STRIKE PRICE & ORDER OBJECT NODE
+**Input:**
+```json
+{
+  "signal": "BUY_CE",
+  "spotPrice": 45250,
+  "confidence": 0.82
+}
+```
+
+**Expected Output:**
+```json
+{
+  "variety": "NORMAL",
+  "tradingsymbol": "BANKNIFTY25JUL2445200CE",
+  "symboltoken": "218057",
+  "transactiontype": "BUY",
+  "exchange": "NFO",
+  "ordertype": "MARKET",
+  "producttype": "INTRADAY",
+  "duration": "DAY",
+  "price": "0",
+  "quantity": "25"
+}
+```
+
+### CALCULATE SL & TARGET LEVELS NODE
+**Input (Order Book Data):**
+```json
+{
+  "data": [
+    {
+      "orderid": "ORD123456",
+      "tradingsymbol": "BANKNIFTY25JUL2445200CE",
+      "orderstatus": "complete",
+      "averageprice": "85.50",
+      "quantity": "25"
+    }
+  ],
+  "entryOrderId": "ORD123456",
+  "symbolToken": "218057"
+}
+```
+
+**Expected Output:**
+```json
+{
+  "entryOrderId": "ORD123456",
+  "symbol": "BANKNIFTY25JUL2445200CE",
+  "symbolToken": "218057",
+  "quantity": "25",
+  "fillPrice": 85.50,
+  "stopLoss": 70.50,
+  "target": 115.50,
+  "timestamp": "2024-01-15T10:30:00",
+  "stopLossOrder": {
+    "variety": "NORMAL",
+    "tradingsymbol": "BANKNIFTY25JUL2445200CE",
+    "symboltoken": "218057",
+    "transactiontype": "SELL",
+    "exchange": "NFO",
+    "ordertype": "SL-M",
+    "producttype": "INTRADAY",
+    "duration": "DAY",
+    "price": "0",
+    "triggerprice": "70.50",
+    "quantity": "25"
+  },
+  "targetOrder": {
+    "variety": "NORMAL",
+    "tradingsymbol": "BANKNIFTY25JUL2445200CE",
+    "symboltoken": "218057",
+    "transactiontype": "SELL",
+    "exchange": "NFO",
+    "ordertype": "LIMIT",
+    "producttype": "INTRADAY",
+    "duration": "DAY",
+    "price": "115.50",
+    "quantity": "25"
+  }
+}
+```
+
+## ================================================================
+## GOOGLE SHEETS TESTING DATA
+## ================================================================
+
+### SIGNALS SHEET TEST DATA
+```
+Timestamp | Signal | Confidence | RSI | MACD | VIX | Sentiment | Writers Zone
+2024-01-15T10:30:00 | BUY_CE | 0.85 | 28 | 2.1 | 14 | BULLISH | BULLISH
+2024-01-15T10:35:00 | HOLD | 0.0 | 52 | 0.2 | 22 | NEUTRAL | NEUTRAL
+2024-01-15T10:40:00 | BUY_PE | 0.78 | 78 | -1.8 | 16 | BEARISH | BEARISH
+```
+
+### TRADES SHEET TEST DATA
+```
+Entry Order ID | Timestamp | Symbol | Entry Price | Stop Loss | Target | Quantity | Status | Signal | Confidence
+ORD123456 | 2024-01-15T10:30:00 | BANKNIFTY25JUL2445200CE | 85.50 | 70.50 | 115.50 | 25 | ACTIVE | BUY_CE | 0.85
+ORD123457 | 2024-01-15T10:45:00 | BANKNIFTY25JUL2445200PE | 92.25 | 77.25 | 122.25 | 25 | CLOSED | BUY_PE | 0.78
+```
+
+### ACTIVE_EXIT_ORDERS SHEET TEST DATA
+```
+Entry Order ID | SL Order ID | Target Order ID | Symbol | Entry Price | SL Price | Target Price | Quantity | Status
+ORD123456 | SL123456 | TGT123456 | BANKNIFTY25JUL2445200CE | 85.50 | 70.50 | 115.50 | 25 | ACTIVE
+```
+
+## ================================================================
+## CURL COMMANDS FOR TESTING
+## ================================================================
+
+### AI MODEL API TESTS
+```bash
+# Health Check
+curl http://localhost:5000/health
+
+# Strong Bullish Test
+curl -X POST http://localhost:5000/predict \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rsi": 28,
+    "macd": {"macd": 2.1, "signal": 1.5, "histogram": 0.6},
+    "momentum": 4.2,
+    "volumeRatio": 2.1,
+    "vix": 14,
+    "sentiment": "BULLISH",
+    "writersZone": "BULLISH",
+    "candlePattern": "HAMMER"
+  }'
+
+# Strong Bearish Test
+curl -X POST http://localhost:5000/predict \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rsi": 78,
+    "macd": {"macd": -1.8, "signal": -1.2, "histogram": -0.6},
+    "momentum": -3.5,
+    "volumeRatio": 1.9,
+    "vix": 16,
+    "sentiment": "BEARISH",
+    "writersZone": "BEARISH",
+    "candlePattern": "SHOOTING_STAR"
+  }'
+
+# High VIX Test
+curl -X POST http://localhost:5000/predict \
+  -H "Content-Type: application/json" \
+  -d '{
+    "rsi": 25,
+    "macd": {"macd": 1.5, "signal": 1.0, "histogram": 0.5},
+    "momentum": 3.0,
+    "volumeRatio": 1.8,
+    "vix": 22,
+    "sentiment": "BULLISH",
+    "writersZone": "BULLISH",
+    "candlePattern": "NORMAL"
+  }'
+
+# Get Model Stats
+curl http://localhost:5000/get_stats
+```
+
+### SENTIMENT API TESTS
+```bash
+# Health Check
+curl http://localhost:5001/health
+
+# Market Sentiment
+curl http://localhost:5001/market-sentiment
+
+# Custom Bullish Text
+curl -X POST http://localhost:5001/test-sentiment \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Indian stock market soars as Nifty hits record high with strong buying in banking and IT stocks"
+  }'
+
+# Custom Bearish Text
+curl -X POST http://localhost:5001/test-sentiment \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Market crashes as Nifty falls sharply due to selling pressure in banking stocks"
+  }'
+
+# Sentiment History
+curl http://localhost:5001/sentiment-history
+```
+
+## ================================================================
+## POSTMAN COLLECTION (JSON)
+## ================================================================
+
+```json
+{
+  "info": {
+    "name": "Trading Bot APIs",
+    "description": "Complete test collection for AI Model and Sentiment APIs"
+  },
+  "item": [
+    {
+      "name": "AI Model Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:5000/health",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "5000",
+          "path": ["health"]
+        }
+      }
+    },
+    {
+      "name": "AI Model Bullish Prediction",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"rsi\": 28,\n  \"macd\": {\"macd\": 2.1, \"signal\": 1.5, \"histogram\": 0.6},\n  \"momentum\": 4.2,\n  \"volumeRatio\": 2.1,\n  \"vix\": 14,\n  \"sentiment\": \"BULLISH\",\n  \"writersZone\": \"BULLISH\",\n  \"candlePattern\": \"HAMMER\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost:5000/predict",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "5000",
+          "path": ["predict"]
+        }
+      }
+    },
+    {
+      "name": "Sentiment API Health",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:5001/health",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "5001",
+          "path": ["health"]
+        }
+      }
+    },
+    {
+      "name": "Market Sentiment",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:5001/market-sentiment",
+          "protocol": "http",
+          "host": ["localhost"],
+          "port": "5001",
+          "path": ["market-sentiment"]
+        }
+      }
+    }
+  ]
+}
+```
+
+This comprehensive testing data ensures you can thoroughly validate all components of your trading bot system! 🚀📈

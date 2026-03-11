@@ -1,0 +1,403 @@
+# N8N WORKFLOW TESTING GUIDE
+# ===========================
+
+## COMPREHENSIVE TESTING PROCEDURE
+## ================================
+
+## ================================================================
+## PHASE 1: PRE-TESTING SETUP
+## ================================================================
+
+### STEP 1: ENVIRONMENT PREPARATION
+□ All environment variables set correctly
+□ n8n running and accessible
+□ Both workflows imported successfully
+□ Google Sheets created and shared
+□ AI model deployed and responding
+□ Angel One API credentials valid
+
+### STEP 2: PAPER TRADING MODE
+CRITICAL: Always start with paper trading!
+
+Set these environment variables:
+N8N_PAPER_TRADING_MODE=true
+N8N_LOT_SIZE=1  # Start with minimum
+N8N_MAX_DAILY_LOSS=100  # Low limit for testing
+
+### STEP 3: BACKUP ORIGINAL WORKFLOWS
+1. Export both workflows
+2. Save as backup files
+3. Document any customizations
+
+## ================================================================
+## PHASE 2: INDIVIDUAL NODE TESTING
+## ================================================================
+
+### TEST 1: CRON TRIGGER
+1. Open main workflow
+2. Click "Trading Hours Cron" node
+3. Click "Execute Node"
+4. Should trigger during trading hours only
+5. Check execution log
+
+EXPECTED RESULT: Node executes during 9:15 AM - 3:15 PM IST
+
+### TEST 2: TIME FILTER
+1. Click "Trading Hours Filter" node
+2. Execute with current time
+3. Should pass during trading hours
+4. Should block outside trading hours
+
+EXPECTED RESULT: Conditional logic works correctly
+
+### TEST 3: ANGEL ONE LOGIN
+1. Click "Angel One Login" node
+2. Execute node
+3. Check response for JWT token
+4. Verify no authentication errors
+
+EXPECTED RESULT:
+{
+  "status": true,
+  "message": "SUCCESS",
+  "data": {
+    "jwtToken": "eyJ...",
+    "refreshToken": "...",
+    "feedToken": "..."
+  }
+}
+
+TROUBLESHOOTING:
+- Invalid TOTP: Update with current code
+- API Key error: Check credentials
+- Network error: Check internet connection
+
+### TEST 4: MARKET DATA NODES
+Test each market data node:
+
+SPOT PRICE NODE:
+1. Click "Get Spot Price"
+2. Execute node
+3. Should return current BANKNIFTY price
+
+EXPECTED RESULT:
+{
+  "status": true,
+  "data": {
+    "exchange": "NSE",
+    "tradingsymbol": "BANKNIFTY-INDEX",
+    "ltp": 45250.75
+  }
+}
+
+CANDLE DATA NODE:
+1. Click "Get 5Min Candles"
+2. Execute node
+3. Should return array of candle data
+
+VIX DATA NODE:
+1. Click "Get India VIX"
+2. Execute node
+3. Should return VIX value
+
+### TEST 5: TECHNICAL INDICATORS
+1. Click "Calculate Technical Indicators"
+2. Ensure candle data is available
+3. Execute node
+4. Check calculated values
+
+EXPECTED RESULT:
+{
+  "indicators": {
+    "rsi": 45.67,
+    "macd": {
+      "macd": 1.23,
+      "signal": 0.89,
+      "histogram": 0.34
+    },
+    "momentum": 2.45,
+    "volumeRatio": 1.34,
+    "candlePattern": "NORMAL"
+  }
+}
+
+### TEST 6: AI MODEL
+1. Click "AI Trade Confirmation"
+2. Execute with sample data
+3. Check response format
+
+EXPECTED RESULT:
+{
+  "signal": "BUY_CE",
+  "confidence": 0.84,
+  "timestamp": "2024-01-15T10:30:00"
+}
+
+TROUBLESHOOTING:
+- Model not responding: Check deployment
+- Invalid response: Verify input format
+- Timeout: Check model performance
+
+### TEST 7: GOOGLE SHEETS
+1. Click any Google Sheets node
+2. Execute with test data
+3. Check sheet for new row
+
+EXPECTED RESULT: New row appears in Google Sheet
+
+## ================================================================
+## PHASE 3: WORKFLOW INTEGRATION TESTING
+## ================================================================
+
+### TEST 1: FULL WORKFLOW EXECUTION
+1. Set paper trading mode
+2. Execute entire workflow manually
+3. Monitor each node execution
+4. Check for errors or failures
+
+### TEST 2: DATA FLOW VALIDATION
+Verify data passes correctly between nodes:
+1. Login → Market Data (JWT token)
+2. Market Data → Indicators (price data)
+3. Indicators → AI Model (calculated values)
+4. AI Model → Order Logic (signal/confidence)
+
+### TEST 3: CONDITIONAL LOGIC
+Test all conditional nodes:
+- Time filter (trading hours)
+- VIX filter (< 18)
+- Signal filter (not HOLD, confidence ≥ 0.75)
+
+### TEST 4: ERROR HANDLING
+Simulate errors and test recovery:
+- Invalid TOTP code
+- Network timeouts
+- API rate limits
+- Invalid market data
+
+## ================================================================
+## PHASE 4: PAPER TRADING VALIDATION
+## ================================================================
+
+### TEST 1: PAPER ORDER SIMULATION
+1. Enable paper trading mode
+2. Let workflow run for full cycle
+3. Check Google Sheets for logged trades
+4. Verify no real orders placed
+
+### TEST 2: RISK MANAGEMENT
+Test risk controls:
+- VIX threshold (should skip when VIX > 18)
+- Confidence threshold (should skip when < 0.75)
+- Daily loss limits
+- Position limits
+
+### TEST 3: LOGGING VERIFICATION
+Check all sheets are updated:
+- Signals sheet: AI predictions logged
+- Trades sheet: Paper trades recorded
+- Active_Exit_Orders: SL/Target orders tracked
+
+### TEST 4: PERFORMANCE MONITORING
+Monitor for 1 week:
+- Execution frequency (every 5 minutes)
+- Success rate (% of successful executions)
+- Error frequency
+- Data accuracy
+
+## ================================================================
+## PHASE 5: EXIT ORDER TESTING
+## ================================================================
+
+### TEST 1: EXIT MONITOR WORKFLOW
+1. Import exit_order_monitor.json
+2. Activate workflow
+3. Let it run alongside main workflow
+4. Check order monitoring functionality
+
+### TEST 2: SL/TARGET SIMULATION
+1. Create test entries in Active_Exit_Orders sheet
+2. Simulate order executions
+3. Verify opposite order cancellation
+4. Check P&L calculations
+
+### TEST 3: ORDER STATUS TRACKING
+1. Monitor order status updates
+2. Verify status changes are logged
+3. Check trade completion workflow
+
+## ================================================================
+## PHASE 6: STRESS TESTING
+## ================================================================
+
+### TEST 1: HIGH FREQUENCY EXECUTION
+1. Reduce cron interval to 1 minute (temporarily)
+2. Monitor system performance
+3. Check for memory leaks
+4. Verify API rate limits
+
+### TEST 2: ERROR RECOVERY
+1. Simulate various failure scenarios
+2. Check workflow recovery
+3. Verify error logging
+4. Test retry mechanisms
+
+### TEST 3: DATA VALIDATION
+1. Test with invalid market data
+2. Check input validation
+3. Verify error handling
+4. Test edge cases
+
+## ================================================================
+## PHASE 7: SECURITY TESTING
+## ================================================================
+
+### TEST 1: CREDENTIAL SECURITY
+1. Verify no credentials in logs
+2. Check environment variable usage
+3. Test credential rotation
+4. Verify secure storage
+
+### TEST 2: API SECURITY
+1. Test TOTP authentication
+2. Verify JWT token handling
+3. Check API key security
+4. Test rate limiting
+
+### TEST 3: DATA PROTECTION
+1. Check Google Sheets permissions
+2. Verify data encryption
+3. Test access controls
+4. Check audit logging
+
+## ================================================================
+## PHASE 8: PERFORMANCE OPTIMIZATION
+## ================================================================
+
+### TEST 1: EXECUTION TIME
+1. Measure workflow execution time
+2. Identify bottlenecks
+3. Optimize slow nodes
+4. Test improvements
+
+### TEST 2: RESOURCE USAGE
+1. Monitor CPU usage
+2. Check memory consumption
+3. Monitor network usage
+4. Optimize resource usage
+
+### TEST 3: SCALABILITY
+1. Test with multiple workflows
+2. Check concurrent execution
+3. Monitor system limits
+4. Plan for scaling
+
+## ================================================================
+## TESTING CHECKLIST
+## ================================================================
+
+### PRE-DEPLOYMENT CHECKLIST:
+□ All individual nodes tested
+□ Full workflow execution successful
+□ Paper trading mode validated
+□ Error handling tested
+□ Security measures verified
+□ Performance optimized
+□ Documentation updated
+□ Backup procedures tested
+
+### DAILY TESTING (DURING PAPER TRADING):
+□ Check workflow executions
+□ Verify data accuracy
+□ Monitor error rates
+□ Review trade logs
+□ Check system performance
+
+### WEEKLY TESTING:
+□ Comprehensive workflow test
+□ Security audit
+□ Performance review
+□ Backup verification
+□ Documentation update
+
+## ================================================================
+## TROUBLESHOOTING COMMON ISSUES
+## ================================================================
+
+### ISSUE: Workflow not executing
+SOLUTIONS:
+1. Check cron expression
+2. Verify workflow is active
+3. Check time zone settings
+4. Review execution logs
+
+### ISSUE: Authentication failures
+SOLUTIONS:
+1. Update TOTP code
+2. Check API credentials
+3. Verify JWT token handling
+4. Test manual login
+
+### ISSUE: Data not logging to sheets
+SOLUTIONS:
+1. Check Google Sheets credentials
+2. Verify sheet permissions
+3. Test sheet connection
+4. Check data format
+
+### ISSUE: AI model not responding
+SOLUTIONS:
+1. Check model deployment
+2. Verify API endpoint
+3. Test with curl
+4. Check model logs
+
+### ISSUE: Orders not placing (paper mode)
+SOLUTIONS:
+1. Verify paper trading mode
+2. Check order simulation logic
+3. Review trade conditions
+4. Test order parameters
+
+## ================================================================
+## SUCCESS CRITERIA
+## ================================================================
+
+### READY FOR LIVE TRADING WHEN:
+□ 30+ days of successful paper trading
+□ Win rate > 60% in paper trading
+□ Maximum drawdown < 10%
+□ All error scenarios handled
+□ Risk management validated
+□ Comprehensive logging working
+□ Security measures implemented
+□ Performance optimized
+□ Documentation complete
+□ Backup procedures tested
+
+### PERFORMANCE BENCHMARKS:
+- Execution success rate: > 95%
+- Average execution time: < 30 seconds
+- Error rate: < 5%
+- Data accuracy: 100%
+- System uptime: > 99%
+
+## ================================================================
+## FINAL VALIDATION
+## ================================================================
+
+Before going live:
+1. Complete all testing phases
+2. Document all customizations
+3. Create emergency procedures
+4. Set up monitoring alerts
+5. Prepare rollback plan
+6. Get final approval
+7. Start with minimum position size
+8. Monitor continuously
+
+Remember: Thorough testing is crucial for automated trading systems. Never skip testing phases, and always prioritize risk management over profits.
+
+## ================================================================
+## END OF TESTING GUIDE
+## ================================================================

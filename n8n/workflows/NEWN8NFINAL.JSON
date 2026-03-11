@@ -1,0 +1,922 @@
+{
+  "name": "Complete Intraday Options Trading Bot with Enhanced Analysis",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "*/5 9-15 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Trading Hours Cron",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [180, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "dateTime": [
+            {
+              "value1": "{{new Date().getHours()}}",
+              "operation": "between",
+              "value2": 9,
+              "value3": 15
+            }
+          ]
+        }
+      },
+      "id": "time-filter",
+      "name": "Trading Hours Filter",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [400, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://apiconnect.angelbroking.com/rest/auth/angelbroking/user/v1/loginByPassword",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "X-UserType": "USER",
+          "X-SourceID": "WEB",
+          "X-ClientLocalIP": "192.168.1.1",
+          "X-ClientPublicIP": "106.193.147.98",
+          "X-MACAddress": "fe80::216:3eff:fe4e:9729",
+          "X-PrivateKey": "{{$env.ANGEL_API_KEY}}"
+        },
+        "body": {
+          "clientcode": "{{$env.ANGEL_CLIENT_ID}}",
+          "password": "{{$env.ANGEL_PASSWORD}}",
+          "totp": "{{$env.ANGEL_TOTP}}"
+        }
+      },
+      "id": "angel-login",
+      "name": "Angel One Login",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [620, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://apiconnect.angelbroking.com/rest/secure/angelbroking/order/v1/getLTP",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "X-UserType": "USER",
+          "X-SourceID": "WEB",
+          "X-ClientLocalIP": "192.168.1.1",
+          "X-ClientPublicIP": "106.193.147.98",
+          "X-MACAddress": "fe80::216:3eff:fe4e:9729",
+          "X-PrivateKey": "{{$env.ANGEL_API_KEY}}",
+          "Authorization": "Bearer {{$node['Angel One Login'].json.data.jwtToken}}"
+        },
+        "body": {
+          "exchange": "NSE",
+          "tradingsymbol": "BANKNIFTY-INDEX",
+          "symboltoken": "99926000"
+        }
+      },
+      "id": "spot-price",
+      "name": "Get Spot Price",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [840, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://apiconnect.angelbroking.com/rest/secure/angelbroking/historical/v1/getCandleData",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "X-UserType": "USER",
+          "X-SourceID": "WEB",
+          "X-ClientLocalIP": "192.168.1.1",
+          "X-ClientPublicIP": "106.193.147.98",
+          "X-MACAddress": "fe80::216:3eff:fe4e:9729",
+          "X-PrivateKey": "{{$env.ANGEL_API_KEY}}",
+          "Authorization": "Bearer {{$node['Angel One Login'].json.data.jwtToken}}"
+        },
+        "body": {
+          "exchange": "NSE",
+          "symboltoken": "99926000",
+          "interval": "FIVE_MINUTE",
+          "fromdate": "{{new Date(Date.now() - 24*60*60*1000).toISOString().split('T')[0]}} 09:15",
+          "todate": "{{new Date().toISOString().split('T')[0]}} 15:30"
+        }
+      },
+      "id": "candle-data",
+      "name": "Get 5Min Candles",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1060, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://apiconnect.angelbroking.com/rest/secure/angelbroking/order/v1/getLTP",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "X-UserType": "USER",
+          "X-SourceID": "WEB",
+          "X-ClientLocalIP": "192.168.1.1",
+          "X-ClientPublicIP": "106.193.147.98",
+          "X-MACAddress": "fe80::216:3eff:fe4e:9729",
+          "X-PrivateKey": "{{$env.ANGEL_API_KEY}}",
+          "Authorization": "Bearer {{$node['Angel One Login'].json.data.jwtToken}}"
+        },
+        "body": {
+          "exchange": "NSE",
+          "tradingsymbol": "INDIA VIX",
+          "symboltoken": "99926009"
+        }
+      },
+      "id": "vix-data",
+      "name": "Get India VIX",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1280, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "{{$node['Get India VIX'].json.data.ltp}}",
+              "operation": "smaller",
+              "value2": 18
+            }
+          ]
+        }
+      },
+      "id": "vix-filter",
+      "name": "VIX Filter (< 18)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1500, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "{{$env.SENTIMENT_API_URL}}/market-sentiment",
+        "headers": {
+          "Authorization": "Bearer {{$env.SENTIMENT_API_KEY}}"
+        }
+      },
+      "id": "market-sentiment",
+      "name": "Market Sentiment API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1720, 300]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://apiconnect.angelbroking.com/rest/secure/angelbroking/order/v1/getOptionChain",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "X-UserType": "USER",
+          "X-SourceID": "WEB",
+          "X-ClientLocalIP": "192.168.1.1",
+          "X-ClientPublicIP": "106.193.147.98",
+          "X-MACAddress": "fe80::216:3eff:fe4e:9729",
+          "X-PrivateKey": "{{$env.ANGEL_API_KEY}}",
+          "Authorization": "Bearer {{$node['Angel One Login'].json.data.jwtToken}}"
+        },
+        "params": {
+          "exchange": "NFO",
+          "tradingsymbol": "BANKNIFTY",
+          "strikeprice": "{{Math.round($node['Get Spot Price'].json.data.ltp / 100) * 100}}",
+          "optiontype": "CE"
+        }
+      },
+      "id": "option-chain-ce",
+      "name": "Get Option Chain CE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1940, 200]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://apiconnect.angelbroking.com/rest/secure/angelbroking/order/v1/getOptionChain",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "X-UserType": "USER",
+          "X-SourceID": "WEB",
+          "X-ClientLocalIP": "192.168.1.1",
+          "X-ClientPublicIP": "106.193.147.98",
+          "X-MACAddress": "fe80::216:3eff:fe4e:9729",
+          "X-PrivateKey": "{{$env.ANGEL_API_KEY}}",
+          "Authorization": "Bearer {{$node['Angel One Login'].json.data.jwtToken}}"
+        },
+        "params": {
+          "exchange": "NFO",
+          "tradingsymbol": "BANKNIFTY",
+          "strikeprice": "{{Math.round($node['Get Spot Price'].json.data.ltp / 100) * 100}}",
+          "optiontype": "PE"
+        }
+      },
+      "id": "option-chain-pe",
+      "name": "Get Option Chain PE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1940, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enhanced Technical Indicators Calculation for Professional Trading\nconst candles = $node['Get 5Min Candles'].json.data;\nconst currentPrice = $node['Get Spot Price'].json.data.ltp;\nconst vix = $node['Get India VIX'].json.data.ltp;\n\n// RSI Calculation (14 period)\nfunction calculateRSI(prices, period = 14) {\n  if (prices.length < period + 1) return 50; // Default neutral\n  \n  const gains = [];\n  const losses = [];\n  \n  for (let i = 1; i < prices.length; i++) {\n    const change = prices[i] - prices[i-1];\n    gains.push(change > 0 ? change : 0);\n    losses.push(change < 0 ? Math.abs(change) : 0);\n  }\n  \n  const avgGain = gains.slice(-period).reduce((a, b) => a + b, 0) / period;\n  const avgLoss = losses.slice(-period).reduce((a, b) => a + b, 0) / period;\n  \n  if (avgLoss === 0) return 100;\n  const rs = avgGain / avgLoss;\n  return 100 - (100 / (1 + rs));\n}\n\n// MACD Calculation\nfunction calculateEMA(prices, period) {\n  if (prices.length === 0) return 0;\n  const k = 2 / (period + 1);\n  let ema = prices[0];\n  for (let i = 1; i < prices.length; i++) {\n    ema = prices[i] * k + ema * (1 - k);\n  }\n  return ema;\n}\n\nfunction calculateMACD(prices) {\n  if (prices.length < 26) return { macd: 0, signal: 0, histogram: 0 };\n  \n  const ema12 = calculateEMA(prices, 12);\n  const ema26 = calculateEMA(prices, 26);\n  const macd = ema12 - ema26;\n  \n  // For signal line, we'll use a simplified approach\n  const macdLine = [macd];\n  const signal = calculateEMA(macdLine, 9);\n  \n  return {\n    macd: macd,\n    signal: signal,\n    histogram: macd - signal\n  };\n}\n\n// Volume Ratio Calculation\nfunction calculateVolumeRatio(candles) {\n  if (candles.length < 20) return 1.0;\n  \n  const currentVolume = parseFloat(candles[candles.length - 1].volume);\n  const avgVolume = candles.slice(-20).reduce((sum, candle) => \n    sum + parseFloat(candle.volume), 0) / 20;\n  \n  return avgVolume > 0 ? currentVolume / avgVolume : 1.0;\n}\n\n// Momentum Calculation\nfunction calculateMomentum(prices, period = 10) {\n  if (prices.length < period) return 0;\n  const current = prices[prices.length - 1];\n  const previous = prices[prices.length - period];\n  return previous > 0 ? ((current - previous) / previous) * 100 : 0;\n}\n\n// Enhanced Candle Pattern Detection\nfunction detectCandlePattern(candle) {\n  const open = parseFloat(candle.open);\n  const high = parseFloat(candle.high);\n  const low = parseFloat(candle.low);\n  const close = parseFloat(candle.close);\n  \n  const body = Math.abs(close - open);\n  const upperShadow = high - Math.max(open, close);\n  const lowerShadow = Math.min(open, close) - low;\n  const totalRange = high - low;\n  \n  if (totalRange === 0) return \"NORMAL\";\n  \n  // Doji - Small body relative to range\n  if (body < totalRange * 0.1) return \"DOJI\";\n  \n  // Hammer - Long lower shadow, small upper shadow\n  if (lowerShadow > body * 2 && upperShadow < body * 0.5) return \"HAMMER\";\n  \n  // Shooting Star - Long upper shadow, small lower shadow\n  if (upperShadow > body * 2 && lowerShadow < body * 0.5) return \"SHOOTING_STAR\";\n  \n  // Marubozu - Very small shadows\n  if (upperShadow < totalRange * 0.05 && lowerShadow < totalRange * 0.05) return \"MARUBOZU\";\n  \n  // Engulfing patterns\n  if (candles.length >= 2) {\n    const prevCandle = candles[candles.length - 2];\n    const prevOpen = parseFloat(prevCandle.open);\n    const prevClose = parseFloat(prevCandle.close);\n    \n    // Bullish Engulfing\n    if (prevClose < prevOpen && close > open && \n        close > prevOpen && open < prevClose) {\n      return \"BULLISH_ENGULFING\";\n    }\n    \n    // Bearish Engulfing\n    if (prevClose > prevOpen && close < open && \n        close < prevOpen && open > prevClose) {\n      return \"BEARISH_ENGULFING\";\n    }\n  }\n  \n  return \"NORMAL\";\n}\n\n// Market Strength Analysis\nfunction analyzeMarketStrength(rsi, macd, momentum, volumeRatio) {\n  let strength = 0;\n  let signals = [];\n  \n  // RSI Analysis\n  if (rsi < 30) {\n    strength += 2;\n    signals.push(\"RSI_OVERSOLD\");\n  } else if (rsi > 70) {\n    strength -= 2;\n    signals.push(\"RSI_OVERBOUGHT\");\n  }\n  \n  // MACD Analysis\n  if (macd.macd > 0 && macd.histogram > 0) {\n    strength += 1.5;\n    signals.push(\"MACD_BULLISH\");\n  } else if (macd.macd < 0 && macd.histogram < 0) {\n    strength -= 1.5;\n    signals.push(\"MACD_BEARISH\");\n  }\n  \n  // Momentum Analysis\n  if (momentum > 2) {\n    strength += 1;\n    signals.push(\"MOMENTUM_STRONG_BULLISH\");\n  } else if (momentum < -2) {\n    strength -= 1;\n    signals.push(\"MOMENTUM_STRONG_BEARISH\");\n  }\n  \n  // Volume Analysis\n  if (volumeRatio > 1.5) {\n    strength += 0.5;\n    signals.push(\"VOLUME_SURGE\");\n  }\n  \n  return { strength, signals };\n}\n\n// Extract and calculate all indicators\nconst closePrices = candles.map(c => parseFloat(c.close));\nconst lastCandle = candles[candles.length - 1];\n\nconst rsi = calculateRSI(closePrices);\nconst macd = calculateMACD(closePrices);\nconst momentum = calculateMomentum(closePrices);\nconst volumeRatio = calculateVolumeRatio(candles);\nconst candlePattern = detectCandlePattern(lastCandle);\nconst marketAnalysis = analyzeMarketStrength(rsi, macd, momentum, volumeRatio);\n\n// Get sentiment from previous node\nconst sentiment = $node['Market Sentiment API'].json.sentiment || 'NEUTRAL';\n\n// Compile comprehensive indicators\nconst indicators = {\n  // Basic Indicators\n  rsi: Math.round(rsi * 100) / 100,\n  macd: {\n    macd: Math.round(macd.macd * 100) / 100,\n    signal: Math.round(macd.signal * 100) / 100,\n    histogram: Math.round(macd.histogram * 100) / 100\n  },\n  momentum: Math.round(momentum * 100) / 100,\n  volumeRatio: Math.round(volumeRatio * 100) / 100,\n  \n  // Market Data\n  spotPrice: currentPrice,\n  vix: vix,\n  sentiment: sentiment,\n  candlePattern: candlePattern,\n  \n  // Analysis Results\n  marketStrength: Math.round(marketAnalysis.strength * 100) / 100,\n  detectedSignals: marketAnalysis.signals,\n  signalCount: marketAnalysis.signals.length,\n  \n  // Market Conditions\n  volatilityRegime: vix > 20 ? \"HIGH\" : vix > 15 ? \"MEDIUM\" : \"LOW\",\n  trendDirection: marketAnalysis.strength > 1 ? \"BULLISH\" : \n                  marketAnalysis.strength < -1 ? \"BEARISH\" : \"SIDEWAYS\",\n  \n  // Additional Context\n  timestamp: new Date().toISOString(),\n  candleCount: candles.length,\n  priceChange: closePrices.length > 1 ? \n    Math.round(((closePrices[closePrices.length - 1] - closePrices[closePrices.length - 2]) / \n    closePrices[closePrices.length - 2]) * 10000) / 100 : 0\n};\n\nreturn { indicators };"
+      },
+      "id": "technical-indicators",
+      "name": "Calculate Technical Indicators",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2160, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enhanced Writers Zone Detection with Professional Analysis\nconst ceOptionChain = $node['Get Option Chain CE'].json.data || [];\nconst peOptionChain = $node['Get Option Chain PE'].json.data || [];\nconst currentPrice = $node['Get Spot Price'].json.data.ltp;\nconst spotPrice = parseFloat(currentPrice);\n\n// Initialize analysis variables\nlet maxCEOI = 0;\nlet maxPEOI = 0;\nlet maxCEStrike = 0;\nlet maxPEStrike = 0;\nlet totalCEOI = 0;\nlet totalPEOI = 0;\n\n// Arrays to store OI data for detailed analysis\nconst ceOIData = [];\nconst peOIData = [];\nconst significantLevels = [];\n\n// Process CE Option Chain\nceOptionChain.forEach(option => {\n  const strike = parseFloat(option.strikeprice || 0);\n  const oi = parseFloat(option.openinterest || 0);\n  const volume = parseFloat(option.volume || 0);\n  \n  if (strike > 0 && oi > 0) {\n    ceOIData.push({ strike, oi, volume, type: 'CE' });\n    totalCEOI += oi;\n    \n    if (oi > maxCEOI) {\n      maxCEOI = oi;\n      maxCEStrike = strike;\n    }\n  }\n});\n\n// Process PE Option Chain\npeOptionChain.forEach(option => {\n  const strike = parseFloat(option.strikeprice || 0);\n  const oi = parseFloat(option.openinterest || 0);\n  const volume = parseFloat(option.volume || 0);\n  \n  if (strike > 0 && oi > 0) {\n    peOIData.push({ strike, oi, volume, type: 'PE' });\n    totalPEOI += oi;\n    \n    if (oi > maxPEOI) {\n      maxPEOI = oi;\n      maxPEStrike = strike;\n    }\n  }\n});\n\n// Calculate Put-Call Ratio\nconst putCallRatio = totalCEOI > 0 ? totalPEOI / totalCEOI : 1.0;\n\n// Find significant support and resistance levels\nconst ceThreshold = maxCEOI * 0.6; // 60% of max CE OI\nconst peThreshold = maxPEOI * 0.6; // 60% of max PE OI\n\nconst significantCELevels = ceOIData\n  .filter(item => item.oi >= ceThreshold)\n  .map(item => item.strike)\n  .sort((a, b) => a - b);\n\nconst significantPELevels = peOIData\n  .filter(item => item.oi >= peThreshold)\n  .map(item => item.strike)\n  .sort((a, b) => a - b);\n\n// Professional Writers Zone Analysis\nfunction analyzeWritersZone() {\n  let analysis = {\n    zone: 'NEUTRAL',\n    confidence: 0,\n    reasoning: [],\n    supportLevels: [],\n    resistanceLevels: [],\n    marketStructure: 'BALANCED'\n  };\n  \n  // Primary Analysis: Price position relative to max OI strikes\n  const distanceFromCEStrike = Math.abs(spotPrice - maxCEStrike);\n  const distanceFromPEStrike = Math.abs(spotPrice - maxPEStrike);\n  \n  // Zone determination based on price position\n  if (spotPrice > maxCEStrike && spotPrice > maxPEStrike) {\n    analysis.zone = 'BULLISH';\n    analysis.confidence += 0.4;\n    analysis.reasoning.push('Price trading above both max CE and PE OI strikes');\n  } else if (spotPrice < maxCEStrike && spotPrice < maxPEStrike) {\n    analysis.zone = 'BEARISH';\n    analysis.confidence += 0.4;\n    analysis.reasoning.push('Price trading below both max CE and PE OI strikes');\n  } else {\n    analysis.reasoning.push('Price between max CE and PE OI strikes - mixed signals');\n  }\n  \n  // Put-Call Ratio Analysis\n  if (putCallRatio > 1.3) {\n    analysis.marketStructure = 'PUT_HEAVY';\n    if (analysis.zone === 'BEARISH') {\n      analysis.confidence += 0.3;\n      analysis.reasoning.push('High Put-Call ratio confirms bearish sentiment');\n    } else if (analysis.zone === 'NEUTRAL') {\n      analysis.zone = 'BEARISH';\n      analysis.confidence += 0.2;\n      analysis.reasoning.push('High Put-Call ratio suggests bearish bias');\n    }\n  } else if (putCallRatio < 0.7) {\n    analysis.marketStructure = 'CALL_HEAVY';\n    if (analysis.zone === 'BULLISH') {\n      analysis.confidence += 0.3;\n      analysis.reasoning.push('Low Put-Call ratio confirms bullish sentiment');\n    } else if (analysis.zone === 'NEUTRAL') {\n      analysis.zone = 'BULLISH';\n      analysis.confidence += 0.2;\n      analysis.reasoning.push('Low Put-Call ratio suggests bullish bias');\n    }\n  } else {\n    analysis.marketStructure = 'BALANCED';\n    analysis.reasoning.push('Balanced Put-Call ratio indicates neutral sentiment');\n  }\n  \n  // Distance Analysis - closer to which max OI\n  if (distanceFromPEStrike < distanceFromCEStrike) {\n    analysis.confidence += 0.1;\n    analysis.reasoning.push('Price closer to PE max OI (potential support)');\n    analysis.supportLevels.push(maxPEStrike);\n  } else if (distanceFromCEStrike < distanceFromPEStrike) {\n    analysis.confidence += 0.1;\n    analysis.reasoning.push('Price closer to CE max OI (potential resistance)');\n    analysis.resistanceLevels.push(maxCEStrike);\n  }\n  \n  // OI Concentration Analysis\n  const oiConcentration = (maxCEOI + maxPEOI) / (totalCEOI + totalPEOI);\n  if (oiConcentration > 0.3) {\n    analysis.confidence += 0.1;\n    analysis.reasoning.push('High OI concentration at key strikes');\n  }\n  \n  // Volume Analysis\n  const ceVolumeAtMaxOI = ceOIData.find(item => item.strike === maxCEStrike)?.volume || 0;\n  const peVolumeAtMaxOI = peOIData.find(item => item.strike === maxPEStrike)?.volume || 0;\n  \n  if (ceVolumeAtMaxOI > peVolumeAtMaxOI * 1.5) {\n    analysis.reasoning.push('Higher CE volume at max OI strike');\n  } else if (peVolumeAtMaxOI > ceVolumeAtMaxOI * 1.5) {\n    analysis.reasoning.push('Higher PE volume at max OI strike');\n  }\n  \n  // Add significant levels to support/resistance\n  significantPELevels.forEach(level => {\n    if (level <= spotPrice) analysis.supportLevels.push(level);\n  });\n  \n  significantCELevels.forEach(level => {\n    if (level >= spotPrice) analysis.resistanceLevels.push(level);\n  });\n  \n  // Remove duplicates and sort\n  analysis.supportLevels = [...new Set(analysis.supportLevels)].sort((a, b) => b - a);\n  analysis.resistanceLevels = [...new Set(analysis.resistanceLevels)].sort((a, b) => a - b);\n  \n  // Final confidence adjustment\n  analysis.confidence = Math.min(analysis.confidence, 1.0);\n  \n  // If confidence is too low, default to NEUTRAL\n  if (analysis.confidence < 0.3) {\n    analysis.zone = 'NEUTRAL';\n    analysis.reasoning.push('Insufficient conviction for directional bias');\n  }\n  \n  return analysis;\n}\n\n// Perform the analysis\nconst writersAnalysis = analyzeWritersZone();\n\n// Compile comprehensive results\nconst result = {\n  // Primary Results\n  writersZone: writersAnalysis.zone,\n  confidence: Math.round(writersAnalysis.confidence * 100) / 100,\n  \n  // OI Data\n  maxCEOI: maxCEOI,\n  maxPEOI: maxPEOI,\n  maxCEStrike: maxCEStrike,\n  maxPEStrike: maxPEStrike,\n  totalCEOI: totalCEOI,\n  totalPEOI: totalPEOI,\n  putCallRatio: Math.round(putCallRatio * 100) / 100,\n  \n  // Significant Levels\n  significantCELevels: significantCELevels,\n  significantPELevels: significantPELevels,\n  supportLevels: writersAnalysis.supportLevels.slice(0, 3), // Top 3\n  resistanceLevels: writersAnalysis.resistanceLevels.slice(0, 3), // Top 3\n  \n  // Analysis Details\n  reasoning: writersAnalysis.reasoning,\n  marketStructure: writersAnalysis.marketStructure,\n  \n  // Market Context\n  currentPrice: spotPrice,\n  distanceFromCEStrike: Math.round(Math.abs(spotPrice - maxCEStrike)),\n  distanceFromPEStrike: Math.round(Math.abs(spotPrice - maxPEStrike)),\n  \n  // Statistics\n  ceOptionsCount: ceOIData.length,\n  peOptionsCount: peOIData.length,\n  oiConcentration: Math.round(((maxCEOI + maxPEOI) / (totalCEOI + totalPEOI)) * 100) / 100,\n  \n  // Timestamp\n  timestamp: new Date().toISOString()\n};\n\nreturn result;"
+      },
+      "id": "writers-zone",
+      "name": "Writers Zone Detection",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2380, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "{{$env.AI_MODEL_URL}}/predict",
+        "headers": {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer {{$env.AI_API_KEY}}"
+        },
+        "body": {
+          "spotPrice": "{{$node['Calculate Technical Indicators'].json.indicators.spotPrice}}",
+          "rsi": "{{$node['Calculate Technical Indicators'].json.indicators.rsi}}",
+          "macd": "{{$node['Calculate Technical Indicators'].json.indicators.macd.macd}}",
+          "momentum": "{{$node['Calculate Technical Indicators'].json.indicators.momentum}}",
+          "volumeRatio": "{{$node['Calculate Technical Indicators'].json.indicators.volumeRatio}}",
+          "candlePattern": "{{$node['Calculate Technical Indicators'].json.indicators.candlePattern}}",
+          "vix": "{{$node['Calculate Technical Indicators'].json.indicators.vix}}",
+          "sentiment": "{{$node['Calculate Technical Indicators'].json.indicators.sentiment}}",
+          "writersZone": "{{$node['Writers Zone Detection'].json.writersZone}}",
+          "marketStrength": "{{$node['Calculate Technical Indicators'].json.indicators.marketStrength}}",
+          "detectedSignals": "{{$node['Calculate Technical Indicators'].json.indicators.detectedSignals}}",
+          "writersConfidence": "{{$node['Writers Zone Detection'].json.confidence}}",
+          "putCallRatio": "{{$node['Writers Zone Detection'].json.putCallRatio}}",
+          "supportLevels": "{{$node['Writers Zone Detection'].json.supportLevels}}",
+          "resistanceLevels": "{{$node['Writers Zone Detection'].json.resistanceLevels}}"
+        }
+      },
+      "id": "ai-confirmation",
+      "name": "AI Trade Confirmation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [2600, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "{{$node['AI Trade Confirmation'].json.signal}}",
+              "operation": "notEqual",
+              "value2": "HOLD"
+            }
+          ],
+          "number": [
+            {
+              "value1": "{{$node['AI Trade Confirmation'].json.confidence}}",
+              "operation": "largerEqual",
+              "value2": 0.75
+            }
+          ]
+        }
+      },
+      "id": "signal-filter",
+      "name": "Signal & Confidence Filter",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [2820, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "spreadsheet",
+        "operation": "appendOrUpdate",
+        "documentId": "{{$env.GOOGLE_SHEET_ID}}",
+        "sheetName": "Signals",
+        "dataMode": "defineBelow",
+        "valueInputMode": "raw",
+        "columnToMatchOn": "A",
+        "valueToMatchOn": "={{new Date().toISOString()}}",
+        "fieldsUi": {
+          "values": [
+            {
+              "fieldId": "Timestamp",
+              "fieldValue": "={{new Date().toISOString()}}"
+            },
+            {
+              "fieldId": "Signal",
+              "fieldValue": "={{$node['AI Trade Confirmation'].json.signal}}"
+            },
+            {
+              "fieldId": "Confidence",
+              "fieldValue": "={{$node['AI Trade Confirmation'].json.confidence}}"
+            },
+            {
+              "fieldId": "RSI",
+              "fieldValue": "={{$node['Calculate Technical Indicators'].json.indicators.rsi}}"
+            },
+            {
+              "fieldId": "MACD",
+              "fieldValue": "={{$node['Calculate Technical Indicators'].json.indicators.macd.macd}}"
+            },
+            {
+              "fieldId": "Momentum",
+              "fieldValue": "={{$node['Calculate Technical Indicators'].json.indicators.momentum}}"
+            },
+            {
+              "fieldId": "Volume Ratio",
+              "fieldValue": "={{$node['Calculate Technical Indicators'].json.indicators.volumeRatio}}"
+            },
+            {
+              "fieldId": "VIX",
+              "fieldValue": "={{$node['Calculate Technical Indicators'].json.indicators.vix}}"
+            },
+            {
+              "fieldId": "Sentiment",
+              "fieldValue": "={{$node['Calculate Technical Indicators'].json.indicators.sentiment}}"
+            },
+            {
+              "fieldId": "Writers Zone",
+              "fieldValue": "={{$node['Writers Zone Detection'].json.writersZone}}"
+            },
+            {
+              "fieldId": "Candle Pattern",
+              "fieldValue": "={{$node['Calculate Technical Indicators'].json.indicators.candlePattern}}"
+            },
+            {
+              "fieldId": "Spot Price",
+              "fieldValue": "={{$node['Calculate Technical Indicators'].json.indicators.spotPrice}}"
+            },
+            {
+              "fieldId": "Market Strength",
+              "fieldValue": "={{$node['Calculate Technical Indicators'].json.indicators.marketStrength}}"
+            },
+            {
+              "fieldId": "Put Call Ratio",
+              "fieldValue": "={{$node['Writers Zone Detection'].json.putCallRatio}}"
+            },
+            {
+              "fieldId": "Writers Confidence",
+              "fieldValue": "={{$node['Writers Zone Detection'].json.confidence}}"
+            }
+          ]
+        }
+      },
+      "id": "log-signal",
+      "name": "Log Signal to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [3040, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enhanced Strike Price Calculation with Live Symbol Token Fetching\nconst signal = $node['AI Trade Confirmation'].json.signal;\nconst spotPrice = $node['Get Spot Price'].json.data.ltp;\nconst jwtToken = $node['Angel One Login'].json.data.jwtToken;\nconst baseStrike = Math.round(spotPrice / 100) * 100;\n\nlet targetStrike;\nlet optionType;\nlet lotSize;\n\n// Determine option type and strike based on signal\nif (signal === 'BUY_CE') {\n  targetStrike = baseStrike; // ATM Call\n  optionType = 'CE';\n} else if (signal === 'BUY_PE') {\n  targetStrike = baseStrike; // ATM Put\n  optionType = 'PE';\n} else {\n  throw new Error('Invalid signal: ' + signal);\n}\n\n// Set lot size based on underlying\nconst underlying = 'BANKNIFTY';\nlotSize = underlying === 'BANKNIFTY' ? 25 : 50; // NIFTY = 50\n\n// Calculate next Thursday expiry\nconst today = new Date();\nconst nextThursday = new Date(today);\nconst daysUntilThursday = (4 - today.getDay() + 7) % 7;\n\nif (daysUntilThursday === 0 && today.getHours() >= 15) {\n  // If it's Thursday after 3 PM, get next Thursday\n  nextThursday.setDate(today.getDate() + 7);\n} else {\n  nextThursday.setDate(today.getDate() + daysUntilThursday);\n}\n\n// Format expiry date for symbol (DDMMMYY format)\nconst months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];\nconst day = String(nextThursday.getDate()).padStart(2, '0');\nconst month = months[nextThursday.getMonth()];\nconst year = String(nextThursday.getFullYear()).slice(-2);\nconst expiryFormat = `${day}${month}${year}`;\n\n// Create trading symbol in Angel One format\nconst tradingSymbol = `BANKNIFTY${expiryFormat}${targetStrike}${optionType}`;\n\n// Fetch live symbol token from Angel One Search Scrip API\nlet symbolToken = \"218057\"; // Default fallback\n\ntry {\n  const searchResponse = await fetch('https://apiconnect.angelbroking.com/rest/secure/angelbroking/order/v1/searchscrip', {\n    method: 'POST',\n    headers: {\n      'Content-Type': 'application/json',\n      'Authorization': `Bearer ${jwtToken}`,\n      'X-PrivateKey': process.env.ANGEL_API_KEY,\n      'X-UserType': 'USER',\n      'X-SourceID': 'WEB',\n      'X-ClientLocalIP': '192.168.1.1',\n      'X-ClientPublicIP': '106.193.147.98',\n      'X-MACAddress': 'fe80::216:3eff:fe4e:9729'\n    },\n    body: JSON.stringify({\n      exchange: 'NFO',\n      searchscrip: tradingSymbol\n    })\n  });\n  \n  if (searchResponse.ok) {\n    const searchData = await searchResponse.json();\n    if (searchData.status && searchData.data && searchData.data.length > 0) {\n      symbolToken = searchData.data[0].symboltoken;\n      console.log(`Found live symbol token: ${symbolToken} for ${tradingSymbol}`);\n    } else {\n      console.warn(`Symbol not found: ${tradingSymbol}, using fallback token`);\n    }\n  } else {\n    console.warn(`Search API failed, using fallback token for ${tradingSymbol}`);\n  }\n} catch (error) {\n  console.error(`Error fetching symbol token: ${error.message}, using fallback`);\n}\n\n// Return complete order object in exact required format\nreturn {\n  \"variety\": \"NORMAL\",\n  \"tradingsymbol\": tradingSymbol,\n  \"symboltoken\": symbolToken,\n  \"transactiontype\": \"BUY\",\n  \"exchange\": \"NFO\",\n  \"ordertype\": \"MARKET\",\n  \"producttype\": \"INTRADAY\",\n  \"duration\": \"DAY\",\n  \"price\": \"0\",\n  \"quantity\": lotSize.toString()\n};"
+      },
+      "id": "calculate-strike",
+      "name": "Calculate Strike Price & Order Object",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3260, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://apiconnect.angelbroking.com/rest/secure/angelbroking/order/v1/placeOrder",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "X-UserType": "USER",
+          "X-SourceID": "WEB",
+          "X-ClientLocalIP": "192.168.1.1",
+          "X-ClientPublicIP": "106.193.147.98",
+          "X-MACAddress": "fe80::216:3eff:fe4e:9729",
+          "X-PrivateKey": "{{$env.ANGEL_API_KEY}}",
+          "Authorization": "Bearer {{$node['Angel One Login'].json.data.jwtToken}}"
+        },
+        "body": "={{$node['Calculate Strike Price & Order Object'].json}}"
+      },
+      "id": "place-entry-order",
+      "name": "Place Entry Market Order",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [3480, 300]
+    },
+    {
+      "parameters": {
+        "amount": 60,
+        "unit": "seconds"
+      },
+      "id": "wait-fill",
+      "name": "Wait for Fill (60s)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [3700, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://apiconnect.angelbroking.com/rest/secure/angelbroking/order/v1/getOrderBook",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "X-UserType": "USER",
+          "X-SourceID": "WEB",
+          "X-ClientLocalIP": "192.168.1.1",
+          "X-ClientPublicIP": "106.193.147.98",
+          "X-MACAddress": "fe80::216:3eff:fe4e:9729",
+          "X-PrivateKey": "{{$env.ANGEL_API_KEY}}",
+          "Authorization": "Bearer {{$node['Angel One Login'].json.data.jwtToken}}"
+        },
+        "body": {}
+      },
+      "id": "get-entry-fill",
+      "name": "Get Entry Fill Price",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [3920, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enhanced Calculate SL & Target Levels with Complete Order Objects\nconst orderBook = $node['Get Entry Fill Price'].json.data;\nconst entryOrderId = $node['Place Entry Market Order'].json.data.orderid;\nconst symbolToken = $node['Calculate Strike Price & Order Object'].json.symboltoken;\n\n// Find the specific entry order in order book\nconst entryOrder = orderBook.find(order => order.orderid === entryOrderId);\n\nif (!entryOrder) {\n  throw new Error(`Entry order not found in order book. Order ID: ${entryOrderId}`);\n}\n\n// Validate entry order is executed\nif (entryOrder.orderstatus !== 'complete' && entryOrder.orderstatus !== 'executed') {\n  throw new Error(`Entry order not executed. Status: ${entryOrder.orderstatus}`);\n}\n\n// Get fill details\nconst fillPrice = parseFloat(entryOrder.averageprice || entryOrder.price);\nconst symbol = entryOrder.tradingsymbol;\nconst quantity = entryOrder.quantity;\n\n// Validate fill price\nif (!fillPrice || fillPrice <= 0) {\n  throw new Error(`Invalid fill price: ${fillPrice}`);\n}\n\n// Calculate SL and Target levels\nconst stopLossPrice = fillPrice - 15;  // 15 points below entry\nconst targetPrice = fillPrice + 30;    // 30 points above entry\n\n// Apply minimum value validation\nconst finalStopLoss = Math.max(stopLossPrice, 0.5); // Minimum SL of 0.5\nconst finalTarget = Math.max(targetPrice, fillPrice + 5); // Minimum target 5 points above entry\n\n// Create Stop Loss Order Object in exact required format\nconst stopLossOrder = {\n  \"variety\": \"NORMAL\",\n  \"tradingsymbol\": symbol,\n  \"symboltoken\": symbolToken,\n  \"transactiontype\": \"SELL\",\n  \"exchange\": \"NFO\",\n  \"ordertype\": \"SL-M\",\n  \"producttype\": \"INTRADAY\",\n  \"duration\": \"DAY\",\n  \"price\": \"0\",\n  \"triggerprice\": finalStopLoss.toString(),\n  \"quantity\": quantity\n};\n\n// Create Target Order Object in exact required format\nconst targetOrder = {\n  \"variety\": \"NORMAL\",\n  \"tradingsymbol\": symbol,\n  \"symboltoken\": symbolToken,\n  \"transactiontype\": \"SELL\",\n  \"exchange\": \"NFO\",\n  \"ordertype\": \"LIMIT\",\n  \"producttype\": \"INTRADAY\",\n  \"duration\": \"DAY\",\n  \"price\": finalTarget.toString(),\n  \"quantity\": quantity\n};\n\n// Return complete data object with order objects ready for API calls\nreturn {\n  // Entry order details\n  entryOrderId: entryOrderId,\n  symbol: symbol,\n  symbolToken: symbolToken,\n  quantity: quantity,\n  fillPrice: fillPrice,\n  \n  // Calculated levels\n  stopLoss: finalStopLoss,\n  target: finalTarget,\n  timestamp: new Date().toISOString(),\n  \n  // Complete order objects (ready for API calls)\n  stopLossOrder: stopLossOrder,\n  targetOrder: targetOrder,\n  \n  // Risk metrics\n  riskAmount: fillPrice - finalStopLoss,\n  rewardAmount: finalTarget - fillPrice,\n  riskRewardRatio: Math.round(((finalTarget - fillPrice) / (fillPrice - finalStopLoss)) * 100) / 100,\n  \n  // Additional info for logging\n  calculationDetails: {\n    originalStopLoss: stopLossPrice,\n    originalTarget: targetPrice,\n    appliedMinimums: {\n      stopLoss: finalStopLoss !== stopLossPrice,\n      target: finalTarget !== targetPrice\n    },\n    entryOrderStatus: entryOrder.orderstatus,\n    executionTime: entryOrder.updatetime || entryOrder.ordertime\n  }\n};"
+      },
+      "id": "calculate-sl-target",
+      "name": "Calculate SL & Target Levels",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4140, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://apiconnect.angelbroking.com/rest/secure/angelbroking/order/v1/placeOrder",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "X-UserType": "USER",
+          "X-SourceID": "WEB",
+          "X-ClientLocalIP": "192.168.1.1",
+          "X-ClientPublicIP": "106.193.147.98",
+          "X-MACAddress": "fe80::216:3eff:fe4e:9729",
+          "X-PrivateKey": "{{$env.ANGEL_API_KEY}}",
+          "Authorization": "Bearer {{$node['Angel One Login'].json.data.jwtToken}}"
+        },
+        "body": "={{$node['Calculate SL & Target Levels'].json.stopLossOrder}}"
+      },
+      "id": "place-sl-order",
+      "name": "Place Stop Loss Order (SL-M)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [4360, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://apiconnect.angelbroking.com/rest/secure/angelbroking/order/v1/placeOrder",
+        "headers": {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "X-UserType": "USER",
+          "X-SourceID": "WEB",
+          "X-ClientLocalIP": "192.168.1.1",
+          "X-ClientPublicIP": "106.193.147.98",
+          "X-MACAddress": "fe80::216:3eff:fe4e:9729",
+          "X-PrivateKey": "{{$env.ANGEL_API_KEY}}",
+          "Authorization": "Bearer {{$node['Angel One Login'].json.data.jwtToken}}"
+        },
+        "body": "={{$node['Calculate SL & Target Levels'].json.targetOrder}}"
+      },
+      "id": "place-target-order",
+      "name": "Place Target Order (LIMIT)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [4360, 400]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "spreadsheet",
+        "operation": "appendOrUpdate",
+        "documentId": "{{$env.GOOGLE_SHEET_ID}}",
+        "sheetName": "Active_Exit_Orders",
+        "dataMode": "defineBelow",
+        "valueInputMode": "raw",
+        "columnToMatchOn": "A",
+        "valueToMatchOn": "={{$node['Calculate SL & Target Levels'].json.entryOrderId}}",
+        "fieldsUi": {
+          "values": [
+            {
+              "fieldId": "Entry Order ID",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.entryOrderId}}"
+            },
+            {
+              "fieldId": "SL Order ID",
+              "fieldValue": "={{$node['Place Stop Loss Order (SL-M)'].json.data.orderid}}"
+            },
+            {
+              "fieldId": "Target Order ID",
+              "fieldValue": "={{$node['Place Target Order (LIMIT)'].json.data.orderid}}"
+            },
+            {
+              "fieldId": "Symbol",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.symbol}}"
+            },
+            {
+              "fieldId": "Entry Price",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.fillPrice}}"
+            },
+            {
+              "fieldId": "SL Price",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.stopLoss}}"
+            },
+            {
+              "fieldId": "Target Price",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.target}}"
+            },
+            {
+              "fieldId": "Quantity",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.quantity}}"
+            },
+            {
+              "fieldId": "Timestamp",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.timestamp}}"
+            },
+            {
+              "fieldId": "Status",
+              "fieldValue": "ACTIVE"
+            },
+            {
+              "fieldId": "Risk Reward Ratio",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.riskRewardRatio}}"
+            }
+          ]
+        }
+      },
+      "id": "log-exit-orders",
+      "name": "Log Exit Orders to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [4580, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "spreadsheet",
+        "operation": "appendOrUpdate",
+        "documentId": "{{$env.GOOGLE_SHEET_ID}}",
+        "sheetName": "Trades",
+        "dataMode": "defineBelow",
+        "valueInputMode": "raw",
+        "columnToMatchOn": "A",
+        "valueToMatchOn": "={{$node['Calculate SL & Target Levels'].json.entryOrderId}}",
+        "fieldsUi": {
+          "values": [
+            {
+              "fieldId": "Entry Order ID",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.entryOrderId}}"
+            },
+            {
+              "fieldId": "Timestamp",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.timestamp}}"
+            },
+            {
+              "fieldId": "Symbol",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.symbol}}"
+            },
+            {
+              "fieldId": "Entry Price",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.fillPrice}}"
+            },
+            {
+              "fieldId": "Stop Loss",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.stopLoss}}"
+            },
+            {
+              "fieldId": "Target",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.target}}"
+            },
+            {
+              "fieldId": "Quantity",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.quantity}}"
+            },
+            {
+              "fieldId": "Status",
+              "fieldValue": "ACTIVE"
+            },
+            {
+              "fieldId": "Signal",
+              "fieldValue": "={{$node['AI Trade Confirmation'].json.signal}}"
+            },
+            {
+              "fieldId": "Confidence",
+              "fieldValue": "={{$node['AI Trade Confirmation'].json.confidence}}"
+            },
+            {
+              "fieldId": "Risk Reward Ratio",
+              "fieldValue": "={{$node['Calculate SL & Target Levels'].json.riskRewardRatio}}"
+            }
+          ]
+        }
+      },
+      "id": "log-trade-summary",
+      "name": "Log Trade Summary",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [4800, 300]
+    }
+  ],
+  "connections": {
+    "Trading Hours Cron": {
+      "main": [
+        [
+          {
+            "node": "Trading Hours Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trading Hours Filter": {
+      "main": [
+        [
+          {
+            "node": "Angel One Login",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Angel One Login": {
+      "main": [
+        [
+          {
+            "node": "Get Spot Price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Spot Price": {
+      "main": [
+        [
+          {
+            "node": "Get 5Min Candles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get 5Min Candles": {
+      "main": [
+        [
+          {
+            "node": "Get India VIX",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get India VIX": {
+      "main": [
+        [
+          {
+            "node": "VIX Filter (< 18)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VIX Filter (< 18)": {
+      "main": [
+        [
+          {
+            "node": "Market Sentiment API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Market Sentiment API": {
+      "main": [
+        [
+          {
+            "node": "Get Option Chain CE",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Option Chain PE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Option Chain CE": {
+      "main": [
+        [
+          {
+            "node": "Calculate Technical Indicators",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Option Chain PE": {
+      "main": [
+        [
+          {
+            "node": "Calculate Technical Indicators",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Technical Indicators": {
+      "main": [
+        [
+          {
+            "node": "Writers Zone Detection",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Writers Zone Detection": {
+      "main": [
+        [
+          {
+            "node": "AI Trade Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Trade Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Signal & Confidence Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Signal & Confidence Filter": {
+      "main": [
+        [
+          {
+            "node": "Log Signal to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Signal to Sheets": {
+      "main": [
+        [
+          {
+            "node": "Calculate Strike Price & Order Object",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate Strike Price & Order Object": {
+      "main": [
+        [
+          {
+            "node": "Place Entry Market Order",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Place Entry Market Order": {
+      "main": [
+        [
+          {
+            "node": "Wait for Fill (60s)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Fill (60s)": {
+      "main": [
+        [
+          {
+            "node": "Get Entry Fill Price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Entry Fill Price": {
+      "main": [
+        [
+          {
+            "node": "Calculate SL & Target Levels",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate SL & Target Levels": {
+      "main": [
+        [
+          {
+            "node": "Place Stop Loss Order (SL-M)",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Place Target Order (LIMIT)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Place Stop Loss Order (SL-M)": {
+      "main": [
+        [
+          {
+            "node": "Log Exit Orders to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Place Target Order (LIMIT)": {
+      "main": [
+        [
+          {
+            "node": "Log Exit Orders to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Exit Orders to Sheets": {
+      "main": [
+        [
+          {
+            "node": "Log Trade Summary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "4"
+}

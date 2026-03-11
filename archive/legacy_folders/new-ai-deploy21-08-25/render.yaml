@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: nifty-trading-ai-model
+    runtime: python
+    buildCommand: pip install -r backend/requirements_fixed.txt
+    startCommand: cd backend && gunicorn ai_model_api_fixed:app --bind 0.0.0.0:$PORT
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: PYTHON_VERSION
+        value: 3.11.11

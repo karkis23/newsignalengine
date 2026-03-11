@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: ai-model-api
+    runtime: python
+    pythonVersion: 3.11                  # ✅ Pin Python version here
+    buildCommand: pip install -r requirements_fixed.txt
+    startCommand: gunicorn ai_model_api_fixed:app
+    envVars:
+      - key: PORT
+        value: 5000
