@@ -150,7 +150,7 @@ class AISignalEngine:
             ai_insights = self._generate_ai_insights(features, proba, predicted_class)
 
             # Build response in v3.0-compatible format
-            from engine.rule_engine import RulesEngine
+            from .rule_engine import RulesEngine
             rules = RulesEngine()
             base = rules._make_response(
                 final_signal=final_signal,

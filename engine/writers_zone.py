@@ -14,7 +14,7 @@
 import logging
 from typing import Any, Dict, List, Optional
 
-from engine.models import RawMarketData
+from .models import RawMarketData
 
 logger = logging.getLogger("writers_zone")
 
@@ -32,8 +32,8 @@ class WritersZoneAnalyzer:
         self.spot = float(payload.spotLTP)
         self.atm_strike = float(payload.atmStrike)
         self.oc_raw = payload.optionChainRaw
-        self.ce_options: List[Dict] = []
-        self.pe_options: List[Dict] = []
+        self.ce_options: List[Dict[str, Any]] = []
+        self.pe_options: List[Dict[str, Any]] = []
         self._parse_chain()
 
     def _parse_chain(self):
@@ -151,16 +151,16 @@ class WritersZoneAnalyzer:
         Positive GEX → market makers are long gamma → they BUY dips and SELL rallies (mean reversion)
         Negative GEX → market makers are short gamma → moves are amplified (trending/explosive)
         """
-        gex_by_strike = {}
+        gex_by_strike: Dict[float, float] = {}
 
         for ce in self.ce_options:
-            g = ce["gamma"] * ce["oi"] * self.spot * self.spot * 0.01
-            gex_by_strike[ce["strike"]] = gex_by_strike.get(ce["strike"], 0) + g
+            g = float(ce["gamma"]) * float(ce["oi"]) * self.spot * self.spot * 0.01
+            gex_by_strike[float(ce["strike"])] = gex_by_strike.get(float(ce["strike"]), 0.0) + g
 
         for pe in self.pe_options:
             # PE gamma creates negative exposure for dealers
-            g = -1 * pe["gamma"] * pe["oi"] * self.spot * self.spot * 0.01
-            gex_by_strike[pe["strike"]] = gex_by_strike.get(pe["strike"], 0) + g
+            g = -1.0 * float(pe["gamma"]) * float(pe["oi"]) * self.spot * self.spot * 0.01
+            gex_by_strike[float(pe["strike"])] = gex_by_strike.get(float(pe["strike"]), 0.0) + g
 
         total_gex = sum(gex_by_strike.values())
 
@@ -172,16 +172,16 @@ class WritersZoneAnalyzer:
             curr_k, curr_g = sorted_strikes[i]
             if prev_g * curr_g < 0:  # Sign change
                 # Linear interpolation
-                gamma_flip = round(prev_k + (0 - prev_g) / (curr_g - prev_g) * (curr_k - prev_k), 0)
+                gamma_flip = float(round(prev_k + (0.0 - prev_g) / (curr_g - prev_g) * (curr_k - prev_k)))
                 break
 
         return {
-            "total_gex": round(total_gex, 0),
-            "regime": "POSITIVE_GEX" if total_gex > 0 else "NEGATIVE_GEX",
+            "total_gex": float(round(float(total_gex))),
+            "regime": "POSITIVE_GEX" if float(total_gex) > 0 else "NEGATIVE_GEX",
             "gamma_flip": gamma_flip,
-            "above_flip": self.spot > gamma_flip if gamma_flip > 0 else None,
+            "above_flip": float(self.spot) > float(gamma_flip) if float(gamma_flip) > 0 else None,
             "gex_description": (
-                "Mean reversion expected (dealers buy dips)" if total_gex > 0
+                "Mean reversion expected (dealers buy dips)" if float(total_gex) > 0
                 else "Explosive moves likely (dealers amplify direction)"
             )
         }
@@ -212,19 +212,21 @@ class WritersZoneAnalyzer:
             )
         }
 
-    def _support_resistance(self) -> Dict:
+    def _support_resistance(self) -> Dict[str, List[float]]:
         """OI-based support and resistance levels."""
-        support = sorted(
-            [o["strike"] for o in self.pe_options if o["strike"] <= self.spot and o["oi"] > 0],
-            key=lambda s: next(o["oi"] for o in self.pe_options if o["strike"] == s),
-            reverse=True
-        )[:3]
+        # Support: PE strikes below spot, sorted by OI descending
+        pe_targets = [o for o in self.pe_options if o["strike"] <= self.spot and o["oi"] > 0]
+        pe_sorted = sorted(pe_targets, key=lambda x: x["oi"], reverse=True)
+        # Workaround for Pyre2 slicing bias: use manual list extraction
+        pe_top = [pe_sorted[i] for i in range(min(len(pe_sorted), 3))]
+        support = [float(o["strike"]) for o in pe_top]
 
-        resistance = sorted(
-            [o["strike"] for o in self.ce_options if o["strike"] >= self.spot and o["oi"] > 0],
-            key=lambda s: next(o["oi"] for o in self.ce_options if o["strike"] == s),
-            reverse=True
-        )[:3]
+        # Resistance: CE strikes above spot, sorted by OI descending
+        ce_targets = [o for o in self.ce_options if o["strike"] >= self.spot and o["oi"] > 0]
+        ce_sorted = sorted(ce_targets, key=lambda x: x["oi"], reverse=True)
+        # Workaround for Pyre2 slicing bias: use manual list extraction
+        ce_top = [ce_sorted[i] for i in range(min(len(ce_sorted), 3))]
+        resistance = [float(o["strike"]) for o in ce_top]
 
         return {"support": support, "resistance": resistance}
 

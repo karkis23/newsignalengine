@@ -13,7 +13,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List
 
-from engine.models import RawMarketData
+from .models import RawMarketData
 
 logger = logging.getLogger("preprocessor")
 

@@ -15,7 +15,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from engine.models import RawMarketData
+from .models import RawMarketData
 
 logger = logging.getLogger("rule_engine")
 
@@ -49,7 +49,7 @@ _MEMORY: Dict[str, Any] = {
 # ---- Constants ----
 BUY_CE_THRESHOLD = 25
 BUY_PE_THRESHOLD = -25
-MIN_STREAK = 2
+MIN_STREAK = 1
 ADX_BOOST_MIN_SCORE = 5
 REPEAT_CLEAR_AFTER_WAITS = 3
 OPENING_BUFFER_MINUTES = 30

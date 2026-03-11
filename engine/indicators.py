@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-from engine.models import RawMarketData
+from .models import RawMarketData
 
 logger = logging.getLogger("indicators")
 
