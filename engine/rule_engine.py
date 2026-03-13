@@ -49,7 +49,7 @@ _MEMORY: Dict[str, Any] = {
 # ---- Constants ----
 BUY_CE_THRESHOLD = 25
 BUY_PE_THRESHOLD = -25
-MIN_STREAK = 1
+MIN_STREAK = 2
 ADX_BOOST_MIN_SCORE = 5
 REPEAT_CLEAR_AFTER_WAITS = 3
 OPENING_BUFFER_MINUTES = 30
@@ -398,7 +398,7 @@ class RulesEngine:
             score = score * 0.7
             debug_flags.append("LATE_DAY_PENALTY")
 
-        score = round(score, 2)
+        score = round(float(score), 2)
 
         # ===================================
         # STEP 23: Determine Raw Signal
