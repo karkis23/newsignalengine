@@ -19,6 +19,8 @@ This folder contains personal notes documenting every important topic, discussio
 | `08_EARNING_AND_WORTH.md` | Is this project worth it? Will it earn money? |
 | `09_MOTIVATION_AND_MINDSET.md` | Personal reflections on doubt, the Valley of Despair, and the vision |
 | `10_IDE_ERRORS_EXPLAINED.md` | Why the VS Code import and round() errors are false positives |
+| `11_HARDWARE_AND_SYSTEM_REQUIREMENTS.md` | Full hardware analysis — Acer Aspire A715-79G assessment |
+| `12_COMPLETE_PROJECT_ANALYSIS.md` | Deep analysis of the entire project — scores, findings, final verdict |
 | `MY_PROJECT_NOTE.md` | The complete project explanation (personal summary) |
 
 ---
