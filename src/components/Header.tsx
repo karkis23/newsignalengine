@@ -22,90 +22,104 @@ export default function Header({
   const mode = engineHealth?.engine_mode ?? 'STANDBY';
 
   return (
-    <header className="header">
+    <header className="header" style={{ height: '72px', borderBottom: '1px solid var(--border-strong)' }}>
       {/* Left: Page Info */}
       <div className="header-left">
-        <h1>{title}</h1>
-        <p>{subtitle}</p>
+        <h1 style={{ fontSize: '18px', fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text-1)' }}>{title}</h1>
+        <p style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-3)', marginTop: '2px' }}>{subtitle}</p>
       </div>
 
       {/* Right: Controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
 
         {/* Market Ticker */}
-        <div className="ticker-pill">
-          <div className="ticker-pill-item">
-            <span className="ticker-label">Nifty 50</span>
-            <span className="ticker-value" style={{ color: 'var(--text-1)' }}>
+        <div className="ticker-pill" style={{ padding: '2px', background: 'var(--bg-subtle)', border: '1px solid var(--border-strong)' }}>
+          <div className="ticker-pill-item" style={{ padding: '6px 16px' }}>
+            <span className="ticker-label" style={{ fontSize: '9px', opacity: 0.6 }}>NIFTY 50</span>
+            <span className="ticker-value" style={{ color: 'var(--text-1)', fontSize: '13px', fontWeight: 700 }}>
               {marketData?.niftyLTP ? marketData.niftyLTP.toLocaleString('en-IN') : '—'}
             </span>
           </div>
-          <div className="ticker-pill-div" />
-          <div className="ticker-pill-item">
-            <span className="ticker-label">VIX</span>
+          <div style={{ width: 1, height: 16, background: 'var(--border-strong)', alignSelf: 'center' }} />
+          <div className="ticker-pill-item" style={{ padding: '6px 16px' }}>
+            <span className="ticker-label" style={{ fontSize: '9px', opacity: 0.6 }}>INDIA VIX</span>
             <span className="ticker-value" style={{
+              fontSize: '13px', fontWeight: 700,
               color: (marketData?.vix ?? 0) > 18 ? 'var(--loss)' : 'var(--profit)'
             }}>
               {marketData?.vix?.toFixed(2) ?? '—'}
             </span>
           </div>
-          <div className="ticker-pill-div" />
-          <div className="ticker-pill-item" style={{ gap: '5px' }}>
-            <span className={`dot ${isMarketOpen ? 'dot-green' : 'dot-gray'}`} />
+          <div style={{ width: 1, height: 16, background: 'var(--border-strong)', alignSelf: 'center' }} />
+          <div className="ticker-pill-item" style={{ padding: '6px 16px', gap: '8px' }}>
+            <span className={`dot ${isMarketOpen ? 'dot-green dot-pulse' : 'dot-gray'}`} style={{ width: '6px', height: '6px' }} />
             <span style={{
-              fontSize: '10.5px', fontWeight: 700, letterSpacing: '0.06em',
-              textTransform: 'uppercase' as const,
-              color: isMarketOpen ? 'var(--profit)' : 'var(--text-3)'
+              fontSize: '10px', fontWeight: 800, letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: isMarketOpen ? 'var(--text-1)' : 'var(--text-3)'
             }}>
-              {isMarketOpen ? 'Open' : 'Closed'}
+              {isMarketOpen ? 'Exchange Open' : 'Exchange Closed'}
             </span>
           </div>
         </div>
 
         {/* Engine Badge */}
-        <div className={`status-pill ${isEngineOnline ? 'status-online' : 'status-standby'}`}>
-          <span className={`dot ${isEngineOnline ? 'dot-green dot-pulse' : 'dot-yellow dot-pulse'}`} />
-          <span>Engine {isEngineOnline ? 'Ready' : 'Standby'}</span>
+        <div className={`status-pill ${isEngineOnline ? 'status-online' : 'status-standby'}`} style={{ 
+          padding: '6px 14px', borderRadius: '10px', height: '36px',
+          background: isEngineOnline ? 'rgba(16, 185, 129, 0.05)' : 'rgba(245, 158, 11, 0.05)',
+          border: '1px solid currentColor'
+        }}>
+          <span className={`dot ${isEngineOnline ? 'dot-green dot-pulse' : 'dot-yellow'}`} style={{ width: '8px', height: '8px' }} />
+          <span style={{ fontSize: '12px', fontWeight: 700 }}>{isEngineOnline ? 'Engine v4.0' : 'Engine Standby'}</span>
           {isEngineOnline && (
-            <span style={{ opacity: 0.55, fontSize: '10px', marginLeft: '2px' }}>
-              · {mode}
+            <span style={{ opacity: 0.6, fontSize: '10px', fontWeight: 600, marginLeft: '6px', paddingLeft: '6px', borderLeft: '1px solid currentColor' }}>
+              {mode}
             </span>
           )}
         </div>
 
-        {/* Divider */}
-        <div style={{ width: 1, height: 24, background: 'var(--border)' }} />
+        {/* Separator */}
+        <div style={{ width: 1, height: 32, background: 'var(--border-strong)' }} />
 
-        {/* Actions */}
-        <button
-          className="icon-btn"
-          onClick={onTogglePolling}
-          title={isPaused ? 'Resume polling' : 'Pause polling'}
-          style={isPaused ? { color: 'var(--warn)', borderColor: 'rgba(245,158,11,0.3)' } : {}}
-        >
-          {isPaused ? <Play size={14} fill="currentColor" /> : <Pause size={14} />}
-        </button>
+        {/* Global Actions */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              className="icon-btn"
+              onClick={onTogglePolling}
+              title={isPaused ? 'Resume live feed' : 'Pause live feed'}
+              style={{
+                  width: '36px', height: '36px', borderRadius: '10px',
+                  background: isPaused ? 'var(--warn-dim)' : 'transparent',
+                  color: isPaused ? 'var(--warn)' : 'var(--text-3)',
+                  borderColor: isPaused ? 'var(--warn)' : 'var(--border-strong)'
+              }}
+            >
+              {isPaused ? <Play size={16} fill="currentColor" /> : <Pause size={16} />}
+            </button>
 
-        <button
-          className={`icon-btn ${loading ? 'spin' : ''}`}
-          onClick={onRefresh}
-          disabled={loading}
-          title="Refresh data"
-        >
-          <RefreshCcw size={14} />
-        </button>
+            <button
+              className={`icon-btn ${loading ? 'spin' : ''}`}
+              onClick={onRefresh}
+              disabled={loading}
+              title="Manual sync"
+              style={{ width: '36px', height: '36px', borderRadius: '10px', borderColor: 'var(--border-strong)' }}
+            >
+              <RefreshCcw size={16} />
+            </button>
 
-        <button 
-          className="icon-btn" 
-          onClick={onToggleTheme}
-          title={theme === 'light' ? "Switch to dark mode" : "Switch to light mode"}
-        >
-          {theme === 'light' ? <Moon size={14} /> : <Sun size={14} />}
-        </button>
+            <button 
+              className="icon-btn" 
+              onClick={onToggleTheme}
+              title={theme === 'light' ? "Midnight Mode" : "Daylight Mode"}
+              style={{ width: '36px', height: '36px', borderRadius: '10px', borderColor: 'var(--border-strong)' }}
+            >
+              {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
+            </button>
 
-        <button className="icon-btn" title="Notifications">
-          <Bell size={14} />
-        </button>
+            <button className="icon-btn" title="Alerts" style={{ width: '36px', height: '36px', borderRadius: '10px', borderColor: 'var(--border-strong)' }}>
+              <Bell size={16} />
+            </button>
+        </div>
       </div>
     </header>
   );

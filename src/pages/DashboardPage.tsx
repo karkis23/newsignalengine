@@ -2,7 +2,8 @@ import { useMemo } from 'react';
 import {
     Activity, Globe, Target, Cpu,
     AlertCircle,
-    TrendingUp, TrendingDown, Minus as Neutral
+    TrendingUp, TrendingDown, Minus as Neutral,
+    Binary
 } from 'lucide-react';
 
 import {
@@ -183,84 +184,143 @@ export default function DashboardPage() {
             </div>
 
             {/* ── Main Grid ──────────────────────────────────────── */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 320px', gap: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: '20px' }}>
 
                 {/* Equity Chart */}
-                <div className="card" style={{ padding: '24px 24px 16px' }}>
-                    <div className="section-header" style={{ marginBottom: '20px' }}>
+                <div className="card" style={{ padding: '28px 24px', display: 'flex', flexDirection: 'column' }}>
+                    <div className="section-header" style={{ marginBottom: '24px' }}>
                         <div>
-                            <div className="section-title">Equity Curve</div>
-                            <div className="section-meta">Cumulative P&L over time</div>
+                            <div className="section-title" style={{ fontSize: '16px' }}>Equity Growth Engine</div>
+                            <div className="section-meta">Institutional performance tracking (Cumulative P&L)</div>
                         </div>
-                        <span className="chip">Last 30 trades</span>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                            <span className="chip" style={{ background: 'var(--accent-dim)', color: 'var(--accent-light)', borderColor: 'rgba(99,102,241,0.2)' }}>Live Account</span>
+                            <span className="chip">Last 30 cycles</span>
+                        </div>
                     </div>
-                    <div style={{ height: 280 }}>
+                    <div style={{ flex: 1, minHeight: 280, position: 'relative' }}>
                         <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={chartData} margin={{ left: 0, right: 0, top: 4, bottom: 0 }}>
+                            <AreaChart data={chartData} margin={{ left: 0, right: 0, top: 10, bottom: 0 }}>
                                 <defs>
                                     <linearGradient id="grad" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="5%"  stopColor="#6366f1" stopOpacity={0.18} />
-                                        <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                                        <stop offset="5%"  stopColor="var(--accent)" stopOpacity={0.2} />
+                                        <stop offset="95%" stopColor="var(--accent)" stopOpacity={0} />
                                     </linearGradient>
                                 </defs>
                                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border-subtle)" vertical={false} />
                                 <XAxis dataKey="timestamp" hide />
                                 <YAxis
                                     axisLine={false} tickLine={false}
-                                    tick={{ fontSize: 11, fill: 'var(--text-3)' }}
+                                    tick={{ fontSize: 11, fill: 'var(--text-3)', fontWeight: 600 }}
                                     tickFormatter={(v: number) => fmtShort(v)}
-                                    width={52}
+                                    width={56}
                                 />
-                                <Tooltip {...TooltipStyle} formatter={(v: any) => [fmt(v), 'P&L']} />
-                                <Area type="monotone" dataKey="pnl" stroke="#6366f1" strokeWidth={2}
-                                    fill="url(#grad)" dot={false} activeDot={{ r: 4, fill: '#6366f1' }} />
+                                <Tooltip 
+                                    {...TooltipStyle} 
+                                    contentStyle={{ ...TooltipStyle.contentStyle, background: 'var(--bg-overlay)', border: '1px solid var(--border-strong)' }}
+                                    formatter={(v: any) => [fmt(v), 'Net P&L']} 
+                                />
+                                <Area type="monotone" dataKey="pnl" stroke="var(--accent-light)" strokeWidth={2.5}
+                                    fill="url(#grad)" dot={false} activeDot={{ r: 5, fill: 'var(--accent-light)', stroke: 'var(--bg-subtle)', strokeWidth: 2 }} />
                             </AreaChart>
                         </ResponsiveContainer>
                     </div>
                 </div>
 
-                {/* Signal Card */}
+                {/* Precision Signal Card */}
                 <div className="card" style={{
-                    padding: '28px 24px',
+                    padding: '32px 28px',
                     display: 'flex', flexDirection: 'column', alignItems: 'center',
-                    gap: '0', justifyContent: 'space-between'
+                    gap: '0', background: 'linear-gradient(180deg, var(--bg-surface) 0%, var(--bg-subtle) 100%)',
+                    boxShadow: 'var(--shadow-lg)'
                 }}>
-                    <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
+                    <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '32px' }}>
                         <div>
-                            <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-3)' }}>Mode</div>
-                            <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-1)', marginTop: '2px' }}>{latest?.engineMode ?? '—'}</div>
+                            <div style={{ fontSize: '9px', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-4)' }}>Orchestrator</div>
+                            <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--accent-light)', marginTop: '4px' }}>{latest?.engineMode ?? 'STANDBY'}</div>
                         </div>
-                        <div className="chip">{latest?.regime ?? 'STABLE'}</div>
+                        <div className="badge badge-accent" style={{ fontSize: '10px' }}>{latest?.regime || 'STABLE'}</div>
                     </div>
 
-                    <DirectionCard sig={latest?.finalSignal ?? 'WAIT'} />
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <DirectionCard sig={latest?.finalSignal ?? 'WAIT'} />
+                    </div>
 
-                    <div style={{ width: '100%', marginTop: '28px', paddingTop: '20px', borderTop: '1px solid var(--border-subtle)' }}>
-                        <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-3)', textAlign: 'center', marginBottom: '10px' }}>
-                            Confidence
+                    <div style={{ width: '100%', marginTop: '32px', paddingTop: '24px', borderTop: '1px solid var(--border)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: '12px' }}>
+                            <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-3)' }}>
+                                Execution Confidence
+                            </div>
+                            <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-1)', fontFamily: 'var(--font-mono)' }}>
+                                {(latest?.confidence ?? 0).toFixed(1)}<span style={{ fontSize: '11px', opacity: 0.4 }}>%</span>
+                            </div>
                         </div>
-                        <div className="progress-bar">
+                        <div className="progress-bar" style={{ height: '6px', background: 'var(--bg-elevated)' }}>
                             <div className="progress-fill" style={{
                                 width: `${Math.abs(latest?.confidence ?? 0)}%`,
-                                background: 'var(--accent-grad)'
+                                background: 'var(--accent-grad)',
+                                boxShadow: '0 0 12px var(--accent-glow)'
                             }} />
                         </div>
-                        <div style={{ textAlign: 'center', fontSize: '22px', fontWeight: 700, color: 'var(--text-1)', marginTop: '10px', letterSpacing: '-0.02em' }}>
-                            {(latest?.confidence ?? 0).toFixed(0)}<span style={{ fontSize: '14px', opacity: 0.4 }}>%</span>
+                        <div style={{ marginTop: '16px', fontSize: '11px', color: 'var(--text-3)', textAlign: 'center', fontStyle: 'italic' }}>
+                            {latest?.confidence >= 30 ? 'Strong directional conviction' : 
+                             latest?.confidence <= -30 ? 'High probability mean reversion' : 
+                             'Awaiting institutional confirmation'}
                         </div>
                     </div>
                 </div>
             </div>
 
-            {/* ── Mini Stats Grid ─────────────────────────────────── */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: '12px' }}>
-                <MiniStat label="RSI" value={(latest as any)?.rsi?.toFixed(1)} />
-                <MiniStat label="ADX" value={latest?.adx?.toFixed(1)} />
-                <MiniStat label="Momentum" value={latest?.momentum?.toFixed(2)} />
-                <MiniStat label="Super Trend" value={latest?.superTrend} />
-                <MiniStat label="VIX" value={latest?.vix?.toFixed(2)} accent={(latest?.vix ?? 0) > 18 ? 'var(--loss)' : 'var(--profit)'} />
-                <MiniStat label="Engine" value={latest?.engineVersion ?? 'v4.0'} accent="var(--accent-light)" />
+            {/* ── Deep Telemetry Grid ─────────────────────────────── */}
+            <div style={{ marginTop: '32px', marginBottom: '32px' }}>
+                 <div style={{ 
+                     display: 'flex', alignItems: 'center', justifyContent: 'space-between', 
+                     marginBottom: '20px', padding: '0 4px' 
+                 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div style={{ width: '3px', height: '16px', background: 'var(--accent)', borderRadius: '2px' }} />
+                        <h3 style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>v4.2.0 Deep Data Matrix</h3>
+                        <span className="badge badge-accent" style={{ fontSize: '9px', padding: '2px 8px' }}>CLUSTER ACTIVE</span>
+                    </div>
+                    <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                        Synchronized via Telemetry Sync v1.4
+                    </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: '14px' }}>
+                    <MiniStat label="PA Score" value={`${latest?.priceActionScore || 0}/100`} accent={latest?.priceActionScore >= 70 ? 'var(--profit)' : latest?.priceActionScore <= 30 ? 'var(--loss)' : 'var(--accent-light)'} />
+                    <MiniStat label="POC Dist" value={latest?.pocDistance?.toFixed(2)} />
+                    <MiniStat label="RSI (14)" value={latest?.rsi?.toFixed(1)} />
+                    <MiniStat label="VOL (ATR)" value={latest?.volatilityATR?.toFixed(2)} />
+                    <MiniStat label="Momentum" value={latest?.momentum?.toFixed(2)} />
+                    <MiniStat label="Progress" value={`${((latest?.sessionProgress || 0) * 100).toFixed(0)}%`} accent="var(--warn)" />
+                </div>
             </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: '14px' }}>
+                <MiniStat label="ADX (Trend)" value={latest?.adx?.toFixed(1)} />
+                <MiniStat label="GEX Expo" value={latest?.gammaExposure?.toFixed(3)} accent={(latest?.gammaExposure ?? 0) > 0 ? 'var(--profit)' : 'var(--loss)'} />
+                <MiniStat label="IV Skew" value={latest?.ivSkew?.toFixed(3)} />
+                <MiniStat label="VIX (Fear)" value={latest?.vix?.toFixed(2)} accent={(latest?.vix ?? 0) > 18 ? 'var(--loss)' : 'var(--profit)'} />
+                <MiniStat label="PCR Ratio" value={latest?.putCallRatio?.toFixed(3)} />
+                <MiniStat label="Super" value={latest?.superTrend} accent="var(--accent-light)" />
+            </div>
+
+            {/* AI Insights Bar */}
+            {latest?.aiInsights && (
+                <div className="card" style={{ padding: '16px 20px', borderLeft: '4px solid var(--accent)', background: 'var(--bg-subtle)' }}>
+                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                         <div style={{ 
+                             padding: '6px', borderRadius: '8px', background: 'var(--accent-dim)', color: 'var(--accent-light)'
+                         }}>
+                            <Binary size={16} />
+                         </div>
+                         <div style={{ flex: 1 }}>
+                             <div style={{ fontSize: '10px', fontWeight: 800, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>AI Engine Insights</div>
+                             <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-2)', marginTop: '2px' }}>{latest.aiInsights}</div>
+                         </div>
+                    </div>
+                </div>
+            )}
 
             {/* ── Logic Trace ─────────────────────────────────────── */}
             {latest?.reason && (

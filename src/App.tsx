@@ -50,45 +50,77 @@ const AppContent: React.FC = () => {
   const { marketData, activeTrades, engineHealth, refresh, loading, isPaused, togglePolling } = useTrading();
   const { theme, toggleTheme } = useTheme();
 
-  const systemStatus = engineHealth?.online
-    ? 'online'
-    : marketData
-      ? 'warning'
-      : 'offline';
 
   return (
-    <div className="app-layout">
-      <Sidebar
-        systemStatus={systemStatus as 'online' | 'offline' | 'warning'}
-        activeTrades={activeTrades.length}
-      />
-      <main className="main-content">
-        <Header
-          title={info.title}
+    <div className="app-container" style={{ 
+      background: 'var(--bg-base)',
+      height: '100vh',
+      display: 'flex',
+      color: 'var(--text-1)',
+      position: 'relative',
+      overflow: 'hidden'
+    }}>
+      {/* Dynamic Ambient Background */}
+      <div style={{
+        position: 'absolute', top: '0%', left: '0%',
+        width: '100%', height: '100%',
+        background: `radial-gradient(circle at 50% 0%, var(--accent-glow) 0%, transparent 70%)`,
+        opacity: theme === 'dark' ? 0.08 : 0.04, pointerEvents: 'none', zIndex: 0
+      }} />
+      <div style={{
+        position: 'absolute', top: '-10%', left: '-10%',
+        width: '40%', height: '40%',
+        background: 'var(--accent-glow)', filter: 'blur(120px)',
+        opacity: theme === 'dark' ? 0.1 : 0.05, pointerEvents: 'none', zIndex: 0
+      }} />
+      <div style={{
+        position: 'absolute', bottom: '-10%', right: '-10%',
+        width: '30%', height: '30%',
+        background: 'var(--accent-glow)', filter: 'blur(100px)',
+        opacity: theme === 'dark' ? 0.05 : 0.03, pointerEvents: 'none', zIndex: 0
+      }} />
+
+      <Sidebar systemStatus={engineHealth?.online ? 'online' : 'warning'} activeTrades={activeTrades.length} />
+      
+      <div className="main-wrapper" style={{ 
+        flex: 1, display: 'flex', flexDirection: 'column', 
+        minWidth: 0, position: 'relative', zIndex: 1,
+        background: 'var(--bg-glass)',
+        backdropFilter: 'blur(20px)',
+        overflow: 'hidden'
+      }}>
+        <Header 
+          title={info.title} 
           subtitle={info.subtitle}
-          loading={loading}
-          isPaused={isPaused}
           marketData={marketData}
           engineHealth={engineHealth}
+          isPaused={isPaused}
+          onTogglePolling={togglePolling}
+          onRefresh={refresh}
           theme={theme}
           onToggleTheme={toggleTheme}
-          onRefresh={refresh}
-          onTogglePolling={togglePolling}
+          loading={loading}
         />
-        <Routes>
-          <Route path="/" element={<DashboardPage />} />
-          <Route path="/signals" element={<SignalsPage />} />
-          <Route path="/trades" element={<TradesPage />} />
-          <Route path="/history" element={<HistoryPage />} />
-          <Route path="/analytics" element={<AnalyticsPage />} />
-          <Route path="/backtest" element={<BacktestPage />} />
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="/validation" element={<ValidationPage />} />
-          <Route path="/engine" element={<PythonEnginePage />} />
-          <Route path="/xai" element={<XAIPage />} />
-          <Route path="/tuning" element={<StrategyTuningPage />} />
-        </Routes>
-      </main>
+        
+        <main className="main-content" style={{ 
+          flex: 1, display: 'flex', flexDirection: 'column',
+          minWidth: 0, overflow: 'hidden'
+        }}>
+          <Routes>
+            <Route path="/" element={<DashboardPage />} />
+            <Route path="/signals" element={<SignalsPage />} />
+            <Route path="/trades" element={<TradesPage />} />
+            <Route path="/history" element={<HistoryPage />} />
+            <Route path="/analytics" element={<AnalyticsPage />} />
+            <Route path="/backtest" element={<BacktestPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="/validation" element={<ValidationPage />} />
+            <Route path="/engine" element={<PythonEnginePage />} />
+            <Route path="/xai" element={<XAIPage />} />
+            <Route path="/tuning" element={<StrategyTuningPage />} />
+          </Routes>
+        </main>
+      </div>
     </div>
   );
 };
