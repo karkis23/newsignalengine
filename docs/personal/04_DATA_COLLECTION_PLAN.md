@@ -17,7 +17,15 @@ The Google Sheet is logging every 5-minute market snapshot. Each row contains:
 
 **Target:** 1,500 to 2,000 rows minimum. This takes approximately 4 to 6 weeks of trading days.
 
+### Data Volume Hierarchy
+| Level | Rows | Time | Reliability | Result |
+| :--- | :--- | :--- | :--- | :--- |
+| **Minimum** | 1,500 - 2,000 | 1 Month | Medium | Basic trend detection |
+| **Better** | 5,000 | 4 Months | High | Strong regime detection (Recommended) |
+| **Professional** | 10,000+ | 8+ Months | Excellent | Veteran-level patterns & fakeout detection |
+
 **Important:** Do NOT change any code during this phase. If you add a new feature midway, earlier rows will have a "hole" in that column, which confuses the AI.
+
 
 ---
 

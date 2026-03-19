@@ -23,19 +23,94 @@ export default function ValidationPage() {
     const { signals, marketData } = useTrading();
     const [expandedRow, setExpandedRow] = useState<number | null>(null);
 
+    /**
+     * SIGNAL AUDIT RESULT CALCULATION (Fixed)
+     * 
+     * Previous bug: All signals compared against the live Nifty price,
+     * causing results to flip every time the price updated.
+     * 
+     * Correct approach:
+     * 1. Signals < 10 mins old  → PENDING (too early to evaluate)
+     * 2. Signals 10-30 mins old → Compare against LIVE price (evaluation window)
+     * 3. Signals > 30 mins old  → Compare against the spot price from a LATER
+     *    signal row (closest to 15-30 mins after). This LOCKS IN the result
+     *    permanently so it never changes again.
+     */
     const analyzed = useMemo(() => {
-        const nifty = marketData?.niftyLTP ?? 0;
+        const liveNifty = marketData?.niftyLTP ?? 0;
+        const nowMs = Date.now();
+
+        // Signals are sorted newest-first, so we work with a time-sorted copy
+        // to find the "comparison price" from a later signal for old entries
+        const chronological = [...signals].sort(
+            (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+        );
+
         return signals.map(s => {
             const entry = s.spotPrice ?? 0;
-            const diff = nifty ? nifty - entry : 0;
-            const pct = entry && nifty ? (diff / entry) * 100 : 0;
-            let status = 'PENDING';
-            if (nifty > 0) {
-                if (s.finalSignal.includes('CE')) status = diff > 0 ? 'CORRECT' : diff < 0 ? 'INCORRECT' : 'PENDING';
-                else if (s.finalSignal.includes('PE')) status = diff < 0 ? 'CORRECT' : diff > 0 ? 'INCORRECT' : 'PENDING';
+            const signalTimeMs = new Date(s.timestamp).getTime();
+            const ageMinutes = (nowMs - signalTimeMs) / 60000;
+
+            let comparePrice = 0;
+            let priceSource: 'PENDING' | 'LIVE' | 'LOCKED' = 'PENDING';
+
+            if (ageMinutes < 10) {
+                // Too early — not enough time for price to move
+                comparePrice = 0;
+                priceSource = 'PENDING';
+            } else if (ageMinutes < 30) {
+                // Evaluation window — use live price
+                comparePrice = liveNifty;
+                priceSource = 'LIVE';
+            } else {
+                // Signal is old enough — find the spot price from a later signal
+                // that was generated 10-30 minutes after this one (locked result)
+                const targetWindowStart = signalTimeMs + 10 * 60000; // +10 min
+                const targetWindowEnd = signalTimeMs + 45 * 60000;   // +45 min (wide window)
+
+                let bestMatch: typeof signals[0] | null = null;
+                let bestTimeDiff = Infinity;
+
+                for (const later of chronological) {
+                    const laterMs = new Date(later.timestamp).getTime();
+                    if (laterMs <= signalTimeMs) continue; // Skip same or earlier
+                    if (laterMs < targetWindowStart) continue; // Too close
+                    if (laterMs > targetWindowEnd) break; // Past the window
+
+                    // Prefer the signal closest to 15 minutes after
+                    const idealTarget = signalTimeMs + 15 * 60000;
+                    const diff = Math.abs(laterMs - idealTarget);
+                    if (diff < bestTimeDiff && later.spotPrice > 0) {
+                        bestTimeDiff = diff;
+                        bestMatch = later;
+                    }
+                }
+
+                if (bestMatch && bestMatch.spotPrice > 0) {
+                    comparePrice = bestMatch.spotPrice;
+                    priceSource = 'LOCKED';
+                } else {
+                    // No later signal found in window — use live as fallback
+                    // (this can happen for the most recent signals on the boundary)
+                    comparePrice = liveNifty;
+                    priceSource = liveNifty > 0 ? 'LIVE' : 'PENDING';
+                }
             }
+
+            const diff = comparePrice > 0 ? comparePrice - entry : 0;
+            const pct = entry && comparePrice ? (diff / entry) * 100 : 0;
+
+            let status = 'PENDING';
+            if (priceSource !== 'PENDING' && comparePrice > 0 && entry > 0) {
+                if (s.finalSignal.includes('CE')) {
+                    status = diff > 0 ? 'CORRECT' : diff < 0 ? 'INCORRECT' : 'PENDING';
+                } else if (s.finalSignal.includes('PE')) {
+                    status = diff < 0 ? 'CORRECT' : diff > 0 ? 'INCORRECT' : 'PENDING';
+                }
+            }
+
             const qScore = (s.confidence > 25 ? 3 : 1) + ((s.adx ?? 0) > 25 ? 3 : 1) + (Math.abs(s.momentum ?? 0) > 10 ? 4 : 2);
-            return { ...s, nifty, status, diff, pct, qScore };
+            return { ...s, comparePrice, priceSource, status, diff, pct, qScore };
         });
     }, [signals, marketData]);
 
@@ -73,8 +148,8 @@ export default function ValidationPage() {
 
     const handleExport = () => {
         const csv = [
-            'Timestamp,Signal,Price,Status,RSI,Confidence,ADX',
-            ...analyzed.map(a => `${a.timestamp},${a.finalSignal},${a.spotPrice},${a.status},${(a as any).rsi?.toFixed(1)},${a.confidence},${a.adx?.toFixed(1)}`)
+            'Timestamp,Signal,Entry Price,Compare Price,Price Source,Move %,Status,RSI,Confidence,ADX',
+            ...analyzed.map(a => `${a.timestamp},${a.finalSignal},${a.spotPrice},${a.comparePrice},${a.priceSource},${a.pct.toFixed(2)},${a.status},${(a as any).rsi?.toFixed(1)},${a.confidence},${a.adx?.toFixed(1)}`)
         ].join('\n');
         const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
         Object.assign(document.createElement('a'), { href: url, download: `zenith_audit_${new Date().toISOString().split('T')[0]}.csv` }).click();
@@ -130,7 +205,7 @@ export default function ValidationPage() {
                 <div className="kpi-card">
                     <div className="kpi-label"><Cpu size={13} color="var(--accent-light)" /> Sample Size</div>
                     <div className="kpi-value font-mono">{analyzed.length}</div>
-                    <div className="kpi-sub">Signals audited</div>
+                    <div className="kpi-sub">{analyzed.filter(a => a.priceSource === 'LOCKED').length} locked · {analyzed.filter(a => a.priceSource === 'PENDING').length} pending</div>
                 </div>
             </div>
 
@@ -154,7 +229,7 @@ export default function ValidationPage() {
                                 <th style={{ borderBottom: '1px solid var(--border)' }}>Time</th>
                                 <th style={{ borderBottom: '1px solid var(--border)' }}>Direction</th>
                                 <th style={{ borderBottom: '1px solid var(--border)' }}>Entry Price</th>
-                                <th style={{ borderBottom: '1px solid var(--border)' }}>Current</th>
+                                <th style={{ borderBottom: '1px solid var(--border)' }}>Compare Price</th>
                                 <th style={{ borderBottom: '1px solid var(--border)' }}>Move</th>
                                 <th style={{ borderBottom: '1px solid var(--border)' }}>Result</th>
                                 <th style={{ borderBottom: '1px solid var(--border)' }}>Quality</th>
@@ -189,10 +264,25 @@ export default function ValidationPage() {
                                             {a.spotPrice?.toFixed(2) ?? '—'}
                                         </td>
                                         <td className="font-mono" style={{ fontSize: '12.5px', color: 'var(--text-1)' }}>
-                                            {a.nifty?.toFixed(2) ?? '—'}
+                                            {a.priceSource === 'PENDING' ? (
+                                                <span style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>Awaiting…</span>
+                                            ) : (
+                                                <div>
+                                                    <span>{a.comparePrice?.toFixed(2)}</span>
+                                                    <span style={{
+                                                        marginLeft: '6px', fontSize: '9px', fontWeight: 700,
+                                                        padding: '1px 5px', borderRadius: '4px',
+                                                        background: a.priceSource === 'LOCKED' ? 'rgba(34,197,94,0.15)' : 'rgba(99,102,241,0.15)',
+                                                        color: a.priceSource === 'LOCKED' ? 'var(--profit)' : 'var(--accent-light)',
+                                                        letterSpacing: '0.05em'
+                                                    }}>
+                                                        {a.priceSource === 'LOCKED' ? '🔒 LOCKED' : '⏱ LIVE'}
+                                                    </span>
+                                                </div>
+                                            )}
                                         </td>
-                                        <td className="font-mono" style={{ fontWeight: 700, color: a.diff > 0 ? 'var(--profit)' : a.diff < 0 ? 'var(--loss)' : 'var(--text-3)' }}>
-                                            {a.diff > 0 ? '+' : ''}{a.pct.toFixed(2)}%
+                                        <td className="font-mono" style={{ fontWeight: 700, color: a.priceSource === 'PENDING' ? 'var(--text-3)' : a.diff > 0 ? 'var(--profit)' : a.diff < 0 ? 'var(--loss)' : 'var(--text-3)' }}>
+                                            {a.priceSource === 'PENDING' ? '—' : `${a.diff > 0 ? '+' : ''}${a.pct.toFixed(2)}%`}
                                         </td>
                                         <td>
                                             {a.status === 'CORRECT'

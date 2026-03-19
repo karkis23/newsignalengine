@@ -62,3 +62,32 @@ You can always check the current mode of the engine at: `http://localhost:8000/h
 
 - `"engine_mode": "RULES_FALLBACK"` → AI not trained yet, rules engine running
 - `"engine_mode": "AI_ENSEMBLE"` → AI model is loaded and making predictions
+
+---
+
+## AI Runtime Behavior (Confidence Thresholds)
+
+One of the most important questions is: **Does the engine fall back to rules if the AI is unsure?**
+
+The answer is **No.** Once the AI is loaded and in `AI_ENSEMBLE` mode, it is the sole decision-maker.
+
+### The 60% Confidence Rule
+Inside `api/engine/signal_engine.py`, the variable `CONFIDENCE_THRESHOLD` is set to **60.0**.
+
+- **If AI confidence > 60%:** It issues a trade signal (BUY CALL or BUY PUT).
+- **If AI confidence < 60%:** It proactively blocks the trade and returns a **"WAIT"** signal. It will **not** check the rules engine for a second opinion.
+
+### Why not fall back to rules?
+The system is designed this way for safety. If the sophisticated AI model, which analyzes 57 different features, is confused by the current market data, the market is likely:
+1.  **Ranging/Choppy:** Not safe for trading.
+2.  **High Noise:** No clear pattern found.
+
+In these cases, a "safe" rule-based system might still fire a signal, but that signal is much more likely to be a "fake-out" or a loss. The system is tuned for **quality over quantity**.
+
+### Summary Matrix
+| State | Logic Source | If Unsure? |
+| :--- | :--- | :--- |
+| **No Model Path** | `rule_engine.py` | Runs all 25 safety rules |
+| **Model Loaded** | `signal_engine.py` | Signals **WAIT** if confidence < 60% |
+| **Emergency Force** | `rule_engine.py` | Bypasses AI completely for safe manual trading |
+
