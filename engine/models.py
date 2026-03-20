@@ -105,3 +105,12 @@ class SignalResponse(BaseModel):
     candlePatterns: List[str] = []
     PA_Type: str = "Ranging"
     MACD_status: str = "Neutral"
+
+    # --- Deep Telemetry Fields (v4.2) ---
+    macd: float = Field(0.0, description="Raw MACD Histogram Value from technical indicators.")
+    market_strength: float = Field(0.0, description="0-100 score combining ADX, EMAs, Volume Spikes, and Options flow into a single directional strength metric.")
+    engine_mode: str = Field("RULES_FALLBACK", description="Indicates whether the AI model was used ('AI_ENSEMBLE') or the backup rules engine ('RULES_FALLBACK').")
+    Price_action_score: float = Field(0.0, description="Score based on Swing Highs/Lows structural breaks (-2 to +2).")
+    poc_distance: float = Field(0.0, description="Distance in points from the current Spot Price to the Volume Profile Point of Control (POC).")
+    volatility_atr: float = Field(0.0, description="Wilder's smoothed Average True Range (ATR) representing current market volatility.")
+    session_progress: float = Field(0.0, description="Percentage (0-100) of the trading day elapsed since 9:15 AM IST.")

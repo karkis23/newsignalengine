@@ -152,6 +152,22 @@ class AISignalEngine:
             # Build response in v3.0-compatible format
             from .rule_engine import RulesEngine
             rules = RulesEngine()
+
+            # v4.2 Deep Telemetry — compute before _make_response
+            macd_value = float(indicators.get("MACD", {}).get("macd", 0))
+            market_strength = rules._compute_market_strength(indicators, writers_zone, float(payload.vix))
+            pa_score = float(indicators.get("PriceAction", {}).get("score", 0))
+            poc = float(indicators.get("VolumeProfile", {}).get("poc", 0))
+            ltp = float(payload.spotLTP)
+            poc_distance = round(ltp - poc, 2) if poc > 0 else 0.0
+            atr_value = float(indicators.get("ATR", {}).get("value", 0))
+
+            # Session progress
+            from datetime import datetime as dt
+            now_ist = dt.now(IST)
+            mins_from_open = max(0, (now_ist.hour * 60 + now_ist.minute) - (9 * 60 + 15))
+            session_progress = round(min(mins_from_open / 375.0 * 100, 100.0), 2)
+
             base = rules._make_response(
                 final_signal=final_signal,
                 regime=self._classify_regime(indicators, payload),
@@ -163,7 +179,14 @@ class AISignalEngine:
                 writers_zone=writers_zone,
                 debug_flags=["AI_MODEL_PREDICTION"],
                 blocked_reason=blocked_reason,
-                ai_insights=ai_insights
+                ai_insights=ai_insights,
+                macd_value=macd_value,
+                market_strength=market_strength,
+                engine_mode="AI_ENSEMBLE",
+                pa_score=pa_score,
+                poc_distance=poc_distance,
+                atr_value=atr_value,
+                session_progress=session_progress,
             )
             base["rawSignal"] = class_labels[predicted_class]
             base["engineVersion"] = "v4.0_AI_Ensemble"

@@ -63,6 +63,42 @@ class RulesEngine:
     Used as fallback when the AI model is not yet trained.
     """
 
+    def _compute_market_strength(self, indicators: Dict, writers_zone: Dict, vix: float) -> float:
+        """
+        Composite market strength score (0-100).
+        Combines ADX trend strength, indicator alignment, volume, and options flow.
+        """
+        strength = 50.0  # Start at neutral
+
+        # ADX contribution (0-25 pts): strong trend = high strength
+        adx_val = float(indicators.get("ADX", {}).get("value", 0))
+        strength += min(adx_val, 50) / 2.0  # max +25
+
+        # Trend alignment (up to ±10 pts)
+        ema_status = indicators.get("EMA20", {}).get("status", "Neutral")
+        st_status = indicators.get("SuperTrend", {}).get("status", "Neutral")
+        psar_status = indicators.get("ParabolicSAR", {}).get("status", "Neutral")
+        aligned = sum(1 for s in [ema_status, st_status, psar_status] if s == "Bullish")
+        aligned -= sum(1 for s in [ema_status, st_status, psar_status] if s == "Bearish")
+        strength += aligned * 3.33  # max ±10
+
+        # Volume spike contribution (0-10 pts)
+        vol_ratio = float(indicators.get("VolumeSpike", {}).get("ratio", 1.0))
+        if vol_ratio > 1.5:
+            strength += min((vol_ratio - 1.0) * 10, 10)
+
+        # VIX penalty: high VIX = less reliable
+        if vix >= 20:
+            strength -= min((vix - 18) * 2, 15)
+
+        # Writers zone boost
+        wz = writers_zone.get("writersZone", "NEUTRAL")
+        wz_conf = float(writers_zone.get("confidence", 0))
+        if wz in ("BULLISH", "BEARISH"):
+            strength += wz_conf * 5  # max ~5 pts
+
+        return round(max(0.0, min(100.0, strength)), 2)
+
     def predict(
         self,
         indicators: Dict,
@@ -80,6 +116,9 @@ class RulesEngine:
         time_str = now_ist.strftime("%H:%M")
         minutes_from_open = (now_ist.hour * 60 + now_ist.minute) - (9 * 60 + 15)
         minutes_from_open = max(0, minutes_from_open)
+
+        # Session progress (0-100%): 375 total trading minutes (9:15 to 15:30)
+        session_progress = round(min(minutes_from_open / 375.0 * 100, 100.0), 2)
 
         ltp = float(payload.spotLTP)
         vix = float(payload.vix)
@@ -469,6 +508,14 @@ class RulesEngine:
         if "MACD_FLIP_BULLISH" in debug_flags: macd_flip = "BULLISH_FLIP"
         elif "MACD_FLIP_BEARISH" in debug_flags: macd_flip = "BEARISH_FLIP"
 
+        # --- v4.2 Deep Telemetry ---
+        macd_value = float(indicators.get("MACD", {}).get("macd", 0))
+        market_strength = self._compute_market_strength(indicators, writers_zone, vix)
+        pa_score = float(indicators.get("PriceAction", {}).get("score", 0))
+        poc = float(indicators.get("VolumeProfile", {}).get("poc", 0))
+        poc_distance = round(ltp - poc, 2) if poc > 0 else 0.0
+        atr_value = float(indicators.get("ATR", {}).get("value", 0))
+
         return self._make_response(
             final_signal, regime, score, " | ".join(reason_parts),
             streak_count, vix, indicators, writers_zone, debug_flags,
@@ -476,7 +523,11 @@ class RulesEngine:
             raw_signal, blocked_reason, streak_confirmed,
             supertrend_status, st_validated, macd_flip,
             session_date, rsi_val, macd_hist, vol_ratio,
-            ai_insights
+            ai_insights,
+            macd_value=macd_value, market_strength=market_strength,
+            engine_mode="RULES_FALLBACK", pa_score=pa_score,
+            poc_distance=poc_distance, atr_value=atr_value,
+            session_progress=session_progress
         )
 
     def _classify_regime(self, vix, adx, st_status, ema_status, pa_type) -> str:
@@ -519,7 +570,10 @@ class RulesEngine:
         raw_signal=None, blocked_reason="", streak_confirmed=False,
         supertrend_status="Neutral", st_validated=False, macd_flip="NONE",
         session_date=None, rsi_val=50.0, macd_hist=0.0, vol_ratio=1.0,
-        ai_insights=None
+        ai_insights=None,
+        # v4.2 Deep Telemetry fields
+        macd_value=0.0, market_strength=0.0, engine_mode="RULES_FALLBACK",
+        pa_score=0.0, poc_distance=0.0, atr_value=0.0, session_progress=0.0
     ) -> Dict:
         return {
             "finalSignal": final_signal,
@@ -557,5 +611,13 @@ class RulesEngine:
             "sessionDate": session_date,
             "candlePatterns": indicators.get("CandlePatterns", []),
             "PA_Type": indicators.get("PriceAction", {}).get("type", "Ranging"),
-            "MACD_status": indicators.get("MACD", {}).get("status", "Neutral")
+            "MACD_status": indicators.get("MACD", {}).get("status", "Neutral"),
+            # --- v4.2 Deep Telemetry ---
+            "macd": macd_value,
+            "market_strength": market_strength,
+            "engine_mode": engine_mode,
+            "Price_action_score": pa_score,
+            "poc_distance": poc_distance,
+            "volatility_atr": atr_value,
+            "session_progress": session_progress,
         }

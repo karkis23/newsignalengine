@@ -63,9 +63,29 @@ def train(data_path: str, test_size: float = 0.2):
     """Full training pipeline."""
     df = load_data(data_path)
 
-    # Separate features from label
-    feature_cols = [c for c in df.columns if c not in ("label", "timestamp", "date", "sessionDate")]
-    X = df[feature_cols].fillna(0).astype(np.float32)
+    # Columns to ignore (labels, timestamps, IDs, and raw text/metadata columns)
+    ignore_cols = {
+        "label", "timestamp", "date", "sessionDate", "id", "created_at",
+        "signal", "reason", "regime", "raw_signal", "rawSignal", "macd_flip",
+        "blocked_reason", "engine_version", "engine_mode", "ai_insights",
+        "super_trend", "LastFireTime", "LastSignal", "IV_skew_bias",
+        "GEX_Regime", "sentiment", "writers_zone", "candle_pattern", "PA_Type", "MACD_status"
+    }
+    
+    # Separate features from label by filtering out ignored columns
+    feature_cols = [c for c in df.columns if c not in ignore_cols]
+    
+    # Drop rows that don't have a label, then build X and y
+    df = df.dropna(subset=["label"])
+    
+    # Attempt to convert to float32 safely
+    try:
+        X = df[feature_cols].fillna(0).astype(np.float32)
+    except ValueError as e:
+        # If it still crashes, log which column caused the issue
+        logger.error(f"❌ Could not convert features to numbers. Check for text in these columns: {feature_cols}")
+        raise e
+        
     y = df["label"].astype(int)
 
     logger.info(f"🔢 Feature count: {len(feature_cols)}")
