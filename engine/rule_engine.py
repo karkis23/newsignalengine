@@ -1,14 +1,15 @@
 # ============================================================
 # engine/rule_engine.py
 # Rules-Based Signal Engine — Python port of Signal Code v3.0
-# This runs when the AI model is NOT yet trained.
-# Version: 4.0.0 | Date: 08 March 2026
+# Version: 4.3.0 | Date: 24 March 2026 (Grand Telemetry Update)
 #
-# Faithful port of all 25 logic steps from v3.0 JS, with:
-#  - All scoring weights preserved
-#  - All VIX graduated scaling preserved
-#  - All ADX/streak/ORB logic preserved
-#  - Memory state now handled server-side (no n8n $getWorkflowStaticData)
+# This runs when the AI model is NOT yet trained.
+#
+# Key Features:
+#  - Preserves all 25 logic steps from v3.0 JS, with ADX/VIX scaling.
+#  - Memory state now handled server-side (no n8n state vars).
+#  - v4.3: Fully populates all 64 indicators required by Supabase
+#    to build the machine learning datasets for future XGBoost training.
 # ============================================================
 
 import logging
@@ -620,4 +621,20 @@ class RulesEngine:
             "poc_distance": poc_distance,
             "volatility_atr": atr_value,
             "session_progress": session_progress,
+            # --- v4.3 Extended Indicators (full Supabase logging) ---
+            "stochastic": float(indicators.get("Stochastic", {}).get("value", 50)),
+            "cci": float(indicators.get("CCI", {}).get("value", 0)),
+            "mfi": float(indicators.get("MFI", {}).get("value", 50)),
+            "bb_width": float(indicators.get("BollingerBands", {}).get("width", 0)),
+            "aroon_up": float(indicators.get("Aroon", {}).get("up", 50)),
+            "aroon_down": float(indicators.get("Aroon", {}).get("down", 50)),
+            "vwap_status": indicators.get("VWAP", {}).get("status", "Neutral"),
+            "plus_di": float(indicators.get("ADX", {}).get("plusDI", 0)),
+            "minus_di": float(indicators.get("ADX", {}).get("minusDI", 0)),
+            "ema20_distance": round(
+                (float(indicators.get("LTP", rsi_val)) - float(indicators.get("EMA20", {}).get("ema", float(indicators.get("LTP", rsi_val)))))
+                / max(float(indicators.get("LTP", 1)), 1) * 100, 3
+            ),
+            "candle_count": int(indicators.get("candleCount", 0)),
+            "today_candle_count": int(indicators.get("todayCandleCount", 0)),
         }

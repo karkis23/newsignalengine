@@ -1,7 +1,7 @@
 # ============================================================
 # engine/models.py
 # Pydantic Data Models — Request and Response Schemas
-# Version: 4.0.0 | Date: 08 March 2026
+# Version: 4.3.0 | Date: 24 March 2026 (Grand Telemetry Update)
 # ============================================================
 
 from pydantic import BaseModel, Field
@@ -107,10 +107,24 @@ class SignalResponse(BaseModel):
     MACD_status: str = "Neutral"
 
     # --- Deep Telemetry Fields (v4.2) ---
-    macd: float = Field(0.0, description="Raw MACD Histogram Value from technical indicators.")
+    macd: float = Field(0.0, description="Raw MACD line value from technical indicators.")
     market_strength: float = Field(0.0, description="0-100 score combining ADX, EMAs, Volume Spikes, and Options flow into a single directional strength metric.")
     engine_mode: str = Field("RULES_FALLBACK", description="Indicates whether the AI model was used ('AI_ENSEMBLE') or the backup rules engine ('RULES_FALLBACK').")
     Price_action_score: float = Field(0.0, description="Score based on Swing Highs/Lows structural breaks (-2 to +2).")
     poc_distance: float = Field(0.0, description="Distance in points from the current Spot Price to the Volume Profile Point of Control (POC).")
     volatility_atr: float = Field(0.0, description="Wilder's smoothed Average True Range (ATR) representing current market volatility.")
     session_progress: float = Field(0.0, description="Percentage (0-100) of the trading day elapsed since 9:15 AM IST.")
+
+    # --- Extended Indicator Fields (v4.3 — for full Supabase logging + ML training) ---
+    stochastic: float = Field(50.0, description="Stochastic %K value (0-100).")
+    cci: float = Field(0.0, description="Commodity Channel Index (CCI-20) value.")
+    mfi: float = Field(50.0, description="Money Flow Index (MFI-14) value (0-100).")
+    bb_width: float = Field(0.0, description="Bollinger Band width as % of middle band.")
+    aroon_up: float = Field(50.0, description="Aroon Up indicator value (0-100).")
+    aroon_down: float = Field(50.0, description="Aroon Down indicator value (0-100).")
+    vwap_status: str = Field("Neutral", description="VWAP position: 'Above' | 'Below' | 'Neutral'.")
+    plus_di: float = Field(0.0, description="ADX +DI directional indicator line.")
+    minus_di: float = Field(0.0, description="ADX -DI directional indicator line.")
+    ema20_distance: float = Field(0.0, description="% distance of LTP from EMA20 (positive = above EMA).")
+    candle_count: int = Field(0, description="Total OHLCV candles available in historical data.")
+    today_candle_count: int = Field(0, description="Number of 5-min candles in today's session.")
