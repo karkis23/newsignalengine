@@ -121,6 +121,8 @@ def train(data_path: str, test_size: float = 0.2):
         num_class=3,
         random_state=42,
         n_jobs=-1,
+        tree_method="hist",
+        device="cuda",
         early_stopping_rounds=50,
         verbosity=1
     )
@@ -149,7 +151,8 @@ def train(data_path: str, test_size: float = 0.2):
     cv_scores = cross_val_score(
         xgb.XGBClassifier(n_estimators=200, max_depth=6, learning_rate=0.05,
                           use_label_encoder=False, eval_metric="mlogloss",
-                          objective="multi:softprob", num_class=3, random_state=42, n_jobs=-1),
+                          objective="multi:softprob", num_class=3, random_state=42, 
+                          n_jobs=-1, tree_method="hist", device="cuda"),
         X.values, y.values, cv=StratifiedKFold(n_splits=5, shuffle=True, random_state=42),
         scoring="accuracy"
     )
