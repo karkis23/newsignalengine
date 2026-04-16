@@ -49,7 +49,7 @@ class SignalResponse(BaseModel):
     Backward compatible so Dhan Execution nodes need NO changes.
     """
     # --- Core Signal ---
-    finalSignal: str = Field(..., description="BUY CALL (CE) / BUY PUT (PE) / WAIT / AVOID / SIDEWAYS / MARKET_CLOSED")
+    finalSignal: str = Field(..., description="BUY CE / BUY PE / WAIT / AVOID / SIDEWAYS / MARKET_CLOSED")
     rawSignal: str = Field(..., description="Pre-filter signal direction before repeat protection")
     confidence: float = Field(..., description="Final composite confidence score")
     blockedReason: str = Field("", description="Why the signal was blocked from firing")
