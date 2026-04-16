@@ -133,7 +133,7 @@ class AISignalEngine:
             # Predict probability
             proba = self._model.predict_proba(feature_vector)[0]
             # Classes: 0=BUY_CE, 1=BUY_PE, 2=WAIT (defined during training)
-            class_labels = {0: "BUY CALL (CE)", 1: "BUY PUT (PE)", 2: "WAIT"}
+            class_labels = {0: "BUY CE", 1: "BUY PE", 2: "WAIT"}
 
             predicted_class = int(np.argmax(proba))
             raw_confidence = float(np.max(proba)) * 100

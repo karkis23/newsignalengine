@@ -444,9 +444,9 @@ class RulesEngine:
         # STEP 23: Determine Raw Signal
         # ===================================
         if score >= BUY_CE_THRESHOLD:
-            raw_signal = "BUY CALL (CE)"
+            raw_signal = "BUY CE"
         elif score <= BUY_PE_THRESHOLD:
-            raw_signal = "BUY PUT (PE)"
+            raw_signal = "BUY PE"
         else:
             raw_signal = "WAIT"
 
@@ -468,7 +468,7 @@ class RulesEngine:
         blocked_reason = ""
         final_signal = raw_signal
 
-        if raw_signal in ("BUY CALL (CE)", "BUY PUT (PE)"):
+        if raw_signal in ("BUY CE", "BUY PE"):
             if not streak_confirmed:
                 final_signal = "WAIT"
                 blocked_reason = f"Streak not confirmed ({streak_count}/{MIN_STREAK})"

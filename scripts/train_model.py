@@ -10,9 +10,9 @@
 # the 64-column signals table).
 #
 # Target Classes:
-#   0 = BUY CALL (CE) — This bar, buying CE within next 60 min hit +25pt target
-#   1 = BUY PUT (PE)  — This bar, buying PE within next 60 min hit +25pt target
-#   2 = WAIT          — Neither target hit within 60 min (SL hit or no movement)
+#   0 = BUY CE — This bar, buying CE within next 60 min hit +25pt target
+#   1 = BUY PE — This bar, buying PE within next 60 min hit +25pt target
+#   2 = WAIT   — Neither target hit within 60 min (SL hit or no movement)
 # ============================================================
 
 import argparse
